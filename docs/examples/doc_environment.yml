@@ -1,0 +1,31 @@
+name: qa4sm_preprocessing_docs
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pandas
+  - numpy
+  - netcdf4
+  - pyresample
+  - gdal
+  - geos
+  - matplotlib
+  - cartopy
+  - jupyterlab
+  - pip
+  - pip:
+      - pygeobase
+      - parse
+      - git+https://github.com/wpreimes/pygeogrids@hr_grid
+      - pynetcf
+      - repurpose
+      - trollsift
+      - cadati
+      - smecv_grid
+      - ipywidgets
+      - ismn
+      - git+https://github.com/wpreimes/io_utils@v0.1
+      - numba
+      - pytesmo
+      - pytest-cov
+      - pytest

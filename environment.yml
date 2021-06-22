@@ -1,0 +1,19 @@
+name: qa4sm_preprocessing
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pandas
+  - numpy
+  - netcdf4
+  - pyresample
+  - pip
+  - pip:
+    - pygeobase
+    - parse
+    - pygeogrids
+    - pynetcf
+    - repurpose
+    - trollsift
+    - pytest-cov
+    - pytest

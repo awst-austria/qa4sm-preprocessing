@@ -2,9 +2,8 @@
 Changelog
 =========
 
-Version 0.1
+Unreleased
 ===========
 
-- Feature A added
-- FIX: nasty bug #1729 fixed
-- add your changes here!
+- Added readers and converters for HR CGLS SSM and SWI image data
+- Added time series readers for converted data, averaging all time series in an area

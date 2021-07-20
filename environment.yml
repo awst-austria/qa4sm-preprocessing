@@ -11,7 +11,7 @@ dependencies:
   - pip:
     - pygeobase
     - parse
-    - pygeogrids
+    - pygeogrids>=0.4.0
     - pynetcf
     - repurpose
     - trollsift

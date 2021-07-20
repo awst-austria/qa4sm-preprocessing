@@ -16,12 +16,13 @@ dependencies:
   - pip:
       - pygeobase
       - parse
-      - git+https://github.com/wpreimes/pygeogrids@hr_grid
+      - pygeogrids
       - pynetcf
       - repurpose
       - trollsift
       - cadati
       - smecv_grid
+      - rasterio
       - ipywidgets
       - ismn
       - git+https://github.com/wpreimes/io_utils@v0.1

@@ -33,31 +33,3 @@ def clear_images(path:str, dryrun: bool = True, prod:str = 'SSM1km'):
                     os.remove(os.path.join(path, thefile))
     print(f"Files to remove: {N} of {N_tot}")
 
-
-if __name__ == '__main__':
-    import numpy as np
-    import pandas as pd
-    from pytesmo.scaling import scale
-
-    def mean_std_scale_ignore_nan(tss, ref_name='ISMN'):
-
-        def scale(src, ref):
-            return ((src - np.nanmean(src)) / np.nanstd(src)) * np.nanstd(ref) + np.nanmean(ref)
-
-        dat_cols = tss.columns[tss.columns != ref_name]
-        tss_scaled = pd.concat([scale(tss[c], tss[ref_name]) for c in dat_cols], axis=1)
-        return tss_scaled
-
-
-    ref_name = 'ISMN'
-    tss = pd.read_csv("/home/wpreimes/Temp/pandas.csv", index_col=0)
-    ts_ref = tss[[ref_name]]
-
-    tss_scaled = mean_std_scale_ignore_nan(tss, ref_name=ref_name)
-
-    tss_scaled = pd.DataFrame(index=tss_scaled.index,
-                              data={'mean': tss_scaled.mean(axis=1),
-                                    'std': tss_scaled.std(axis=1),
-                                    'mean+std': tss_scaled.mean(axis=1)+tss_scaled.std(axis=1),
-                                    'mean-std': tss_scaled.mean(axis=1)-tss_scaled.std(axis=1),
-                                    'N': tss_scaled.count(axis=1)})

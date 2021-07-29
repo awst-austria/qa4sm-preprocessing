@@ -12,6 +12,8 @@ dependencies:
   - matplotlib
   - cartopy
   - jupyterlab
+  - xarray
+  - dask
   - pip
   - pip:
       - pygeobase
@@ -30,3 +32,6 @@ dependencies:
       - pytesmo
       - pytest-cov
       - pytest
+      - tqdm
+      - sphinx_rtd_theme
+      - nbsphinx

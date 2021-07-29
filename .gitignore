@@ -37,6 +37,9 @@ htmlcov/*
 junit*.xml
 coverage.xml
 .pytest_cache/
+tests/test-data/lis_noahmp_stacked.nc
+tests/test-data/lis_noahmp_transposed.nc
+tests/test-data/lis_noahmp_timeseries
 
 # Build and docs folder/files
 build/*

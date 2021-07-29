@@ -167,8 +167,16 @@ class XarrayReaderBase:
             coord = np.array([start + i * step for i in range(dimlen)])
         else:
             # infer coordinate from variable in dataset
-            othername = "lon" if coordname == "lat" else "lat"
-            coord = ds[cname].isel({getattr(self, othername + "dim"): 0})
+            coord = ds[cname]
+            if len(coord.dims) > 1:
+                othername = "lon" if coordname == "lat" else "lat"
+                other_cname = getattr(self, othername + "dim")
+                warnings.warn(
+                    f"{cname} has more than one dimension, using values for"
+                    f" {other_cname} index = 0"
+                )
+                coord = coord.isel({other_cname: 0})
+            coord = coord.rename({dimname: cname})
             if np.any(np.isnan(coord)):  # pragma: no cover
                 raise ReaderError(
                     f"Inferred coordinate values for {coordname}"
@@ -178,9 +186,9 @@ class XarrayReaderBase:
                 )
         return xr.DataArray(
             coord,
-            coords={self.latname: coord},
-            dims=[self.latname],
-            name=self.latname,
+            coords={cname: coord},
+            dims=[cname],
+            name=cname,
         )
 
     def _select_vars_levels(self, ds):

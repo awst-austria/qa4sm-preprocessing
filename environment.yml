@@ -5,6 +5,8 @@ channels:
 dependencies:
   - pandas
   - numpy
+  - xarray
+  - dask
   - netcdf4
   - pyresample
   - pip
@@ -17,3 +19,6 @@ dependencies:
     - trollsift
     - pytest-cov
     - pytest
+    - h5netcdf
+    - tqdm
+    - matplotlib

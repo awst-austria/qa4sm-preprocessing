@@ -26,7 +26,6 @@ def create_transposed_netcdf(
     end: datetime.datetime = None,
     memory: float = 2,
     n_threads: int = 4,
-    chunks: Tuple = None,
     zlib: bool = True,
     complevel: int = 4,
 ):
@@ -142,8 +141,6 @@ def create_transposed_netcdf(
         tmp_dask_chunks = tuple(tmp_dask_chunks)
         temporary_dask_chunks.append(tmp_dask_chunks)
 
-        if Path(outfname + f".tmp.{i}").exists():
-            continue
         block = reader.read_block(
             start=timestamps[s], end=timestamps[e - 1]
         ).chunk(dict(zip(new_dim_names, tmp_dask_chunks)))
@@ -155,7 +152,7 @@ def create_transposed_netcdf(
                 category=FutureWarning,
             )
             transposed_block.to_netcdf(
-                outfname + f".tmp.{i}",
+                str(outfname) + f".tmp.{i}",
                 encoding={
                     varname: {"chunksizes": tmp_chunks}
                     for varname in reader.varnames
@@ -164,9 +161,8 @@ def create_transposed_netcdf(
             )
 
     if num_blocks == 1:
-        Path(outfname + f".tmp.{i}").rename(outfname)
+        Path(str(outfname) + f".tmp.{i}").rename(outfname)
     else:
-
         datasets = []
         for i in range(num_blocks):
             with warnings.catch_warnings():
@@ -176,7 +172,7 @@ def create_transposed_netcdf(
                     category=FutureWarning,
                 )
                 ds = xr.open_dataset(
-                    outfname + f".tmp.{i}",
+                    str(outfname) + f".tmp.{i}",
                     chunks=dict(zip(new_dim_names, temporary_dask_chunks[i])),
                     engine="h5netcdf",
                 )
@@ -210,6 +206,6 @@ def create_transposed_netcdf(
             )
         # remove temporary files
         for i in range(num_blocks):
-            Path(outfname + f".tmp.{i}").unlink()
+            Path(str(outfname) + f".tmp.{i}").unlink()
 
     logging.info("create_transposed_netcdf: Finished writing transposed file.")

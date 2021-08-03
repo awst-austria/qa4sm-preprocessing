@@ -9,6 +9,7 @@ import fnmatch
 import logging
 import numpy as np
 import os
+import glob
 import pandas as pd
 from pathlib import Path
 import re
@@ -488,10 +489,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # that match our pattern
         directory = Path(directory)
         filepaths = {}
-        for root, dirs, files in os.walk(directory):
-            for fname in files:
-                if fnmatch.fnmatch(fname, pattern):
-                    filepaths[fname] = Path(root) / fname
+        for fpath in glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True):
+            fname = Path(fpath).name
+            filepaths[fname] = fpath
 
         if not filepaths:  # pragma: no cover
             raise ReaderError(
@@ -877,7 +877,6 @@ class XarrayTSReader(XarrayReaderBase):
         -------
         df : pd.DataFrame
         """
-
         if len(args) == 1:
             gpi = args[0]
             if self._has_regular_grid:
@@ -901,5 +900,5 @@ class XarrayTSReader(XarrayReaderBase):
             data = self.orig_data.sel(lat=lat, lon=lon)
         else:
             data = self.data[{self.locdim: gpi}]
-        df = data.to_pandas()
+        df = data.to_pandas()[self.varnames]
         return df

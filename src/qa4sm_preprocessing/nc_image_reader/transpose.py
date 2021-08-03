@@ -1,4 +1,5 @@
 import dask
+import dask.array as dsa
 from dask.distributed import Client
 import datetime
 import logging
@@ -6,7 +7,6 @@ import math
 from multiprocessing.pool import ThreadPool
 import numpy as np
 from pathlib import Path
-from tqdm import trange
 from typing import Union, Tuple, TypeVar
 import warnings
 import xarray as xr
@@ -28,10 +28,12 @@ def create_transposed_netcdf(
     n_threads: int = 4,
     zlib: bool = True,
     complevel: int = 4,
-    dask_client: Client = None,
+    distributed: Union[bool, Client] = False,
 ):
     """
     Creates a stacked and transposed netCDF file from a given reader.
+
+    WARNING: very experimental!
 
     Parameters
     ----------
@@ -55,14 +57,30 @@ def create_transposed_netcdf(
     complevel : int, optional
         Compression level to use. Default is 4. Range is from 1 (low) to 9
         (high).
-    dask_client : dask.distributed.client, optional
-        The client to use. If no client is given, a new one is created using
-        `n_threads` and `memory`, otherwise the given client is used.
+    distributed : bool or Client, optional
+        Whether to use the local or the distributed dask scheduler. If a client
+        for a distributed scheduler is used, this is used instead.
     """
     dask_config = {
         "array.slicing.split_large_chunks": False,
     }
-    if dask_client is None:
+    if isinstance(distributed, Client) or not distributed:
+        if not distributed:
+            dask_config.update(
+                {"scheduler": "threads", "pool": ThreadPool(n_threads)}
+            )
+        with dask.config.set(**dask_config):
+            _transpose(
+                reader,
+                outfname,
+                new_last_dim=new_last_dim,
+                start=start,
+                end=end,
+                memory=memory,
+                zlib=zlib,
+                complevel=complevel,
+            )
+    elif distributed:
         with dask.config.set(**dask_config), Client(
             n_workers=1,
             threads_per_worker=n_threads,
@@ -76,24 +94,9 @@ def create_transposed_netcdf(
                 start=start,
                 end=end,
                 memory=memory,
-                n_threads=n_threads,
                 zlib=zlib,
                 complevel=complevel,
-                client=client,
             )
-    else:
-        _transpose(
-            reader,
-            outfname,
-            new_last_dim=new_last_dim,
-            start=start,
-            end=end,
-            memory=memory,
-            n_threads=n_threads,
-            zlib=zlib,
-            complevel=complevel,
-            client=dask_client,
-        )
 
 
 def _transpose(
@@ -103,159 +106,123 @@ def _transpose(
     start: datetime.datetime = None,
     end: datetime.datetime = None,
     memory: float = 2,
-    n_threads: int = 4,
     zlib: bool = True,
     complevel: int = 4,
-    client: Client = None,
 ):
     new_last_dim = reader.timename
     timestamps = reader.tstamps_for_daterange(start, end)
 
-    # first, get some info about structure of the input file
-    first_img = reader.read_block(start=timestamps[0], end=timestamps[0])
-    dtype = [first_img[v].dtype for v in reader.varnames]
-    input_dim_names = [first_img[v].dims for v in reader.varnames]
-    input_dim_sizes = [first_img[v].shape for v in reader.varnames]
-    for i in range(1, len(input_dim_names)):
-        assert input_dim_names[i] == input_dim_names[0]
-        assert input_dim_sizes[i] == input_dim_sizes[0]
-    input_dim_names = input_dim_names[0]
-    input_dim_sizes = input_dim_sizes[0]
+    # we need to mask the grid, because it doesn't support pickling
+    grid = reader.grid
+    reader.grid = None
 
-    if input_dim_names[-1] == new_last_dim:  # pragma: no cover
-        print(f"{new_last_dim} is already the last dimension")
+    variable_datasets = []
+    for varname in reader.varnames:
 
-    # get new dim names in the correct order
-    new_dim_names = list(input_dim_names)
-    new_dim_names.remove(new_last_dim)
-    new_dim_names.append(new_last_dim)
-    new_dim_names = tuple(new_dim_names)
-    new_dim_sizes = [
-        input_dim_sizes[input_dim_names.index(dim)] for dim in new_dim_names
-    ]
-    new_dim_sizes[-1] = len(timestamps)
-    new_dim_sizes = tuple(new_dim_sizes)
+        # first, get some info about structure of the input file
+        first_img = reader.read_block(start=timestamps[0], end=timestamps[0])[
+            varname
+        ]
+        dtype = first_img.dtype
+        input_dim_names = first_img.dims
+        input_dim_sizes = first_img.shape
 
-    # netCDF chunks should be about 1MB in size
-    chunks = [infer_chunks(new_dim_sizes, 1, dt) for dt in dtype]
-    # dask chunks should be about 100MB in size, but it's not too bad if we
-    # are of by a factor of 2, so we just use the datatype of the first array
-    dask_chunks = infer_chunks(new_dim_sizes, 100, dtype[0])
-    size = [dt.itemsize for dt in dtype]
-    chunksize_MB = [
-        np.prod(chunks[i]) * size[i] / 1024 ** 2 for i in range(len(chunks))
-    ]
-    for i, v in enumerate(reader.varnames):
+        if input_dim_names[-1] == new_last_dim:  # pragma: no cover
+            print(f"{new_last_dim} is already the last dimension")
+
+        # get new dim names in the correct order
+        new_dim_names = list(input_dim_names)
+        new_dim_names.remove(new_last_dim)
+        new_dim_names.append(new_last_dim)
+        new_dim_names = tuple(new_dim_names)
+        new_dim_sizes = [
+            input_dim_sizes[input_dim_names.index(dim)]
+            for dim in new_dim_names
+        ]
+        new_dim_sizes[-1] = len(timestamps)
+        new_dim_sizes = tuple(new_dim_sizes)
+
+        # netCDF chunks should be about 1MB in size
+        chunks = infer_chunks(new_dim_sizes, 1, dtype)
+        size = dtype.itemsize
+        chunksize_MB = np.prod(chunks) * size / 1024 ** 2
         logging.info(
-            f"create_transposed_netcdf: Creating chunks {chunks[i]}"
-            f" with chunksize {chunksize_MB[i]:.2f} MB for {v}"
+            f"create_transposed_netcdf: Creating chunks {str(chunks)}"
+            f" with chunksize {chunksize_MB:.2f} MB for {varname}"
         )
 
-    # calculate block size to use based on given memory size
-    len_new_dim = new_dim_sizes[-1]
-    imagesize_GB = np.prod(new_dim_sizes[:-1]) * sum(size) / 1024 ** 3
-    # we need to divide by two, because we need intermediate storage for
-    # the transposing, and experience showed we need another factor of 2
-    stepsize = int(math.floor(memory / imagesize_GB)) // 4
-    stepsize = min(stepsize, len_new_dim)
-    logging.info(
-        f"create_transposed_netcdf: Using {stepsize} images as buffer"
-    )
-    block_start = list(
-        map(int, np.arange(0, len_new_dim + stepsize - 0.5, stepsize))
-    )
-    block_start[-1] = min(block_start[-1], len_new_dim)
+        # calculate intermediate chunk size in time direction
+        len_new_dim = new_dim_sizes[-1]
+        imagesize_GB = np.prod(new_dim_sizes[:-1]) * size / 1024 ** 3
+        # we need to divide by two, because we need intermediate storage for
+        # the transposing, and we need another factor of 2-3 because of
+        # unmanaged memory in the dask scheduler
+        stepsize = int(math.floor(memory / imagesize_GB)) // 5
+        stepsize = min(stepsize, len_new_dim)
+        logging.info(
+            f"create_transposed_netcdf: Using {stepsize} images as buffer"
+        )
 
-    num_blocks = len(block_start) - 1
+        # dask chunks should be about 50MB in size
+        # infer_chunks assumes that the last dimension is the continuous dimension
+        tmp_dim_sizes = list(new_dim_sizes)
+        tmp_dim_sizes[-1] = stepsize
+        tmp_dask_chunks = list(infer_chunks(tmp_dim_sizes, 50, dtype))
+        dask_chunks = [stepsize] + tmp_dask_chunks[:-1]
+        dask_chunks = tuple(dask_chunks)
 
-    # We are first creating intermediate files, that we will then merge to a
-    # single file as final step.
-    # The intermediate files will not be compressed, but chunked.
-    if num_blocks == 1:
-        print("Creating transposed file:")
-    else:
-        print("Creating intermediate files:")
-    temporary_dask_chunks = []
-    for i in trange(num_blocks):
-        s, e = block_start[:-1][i], block_start[1:][i]
+        def _get_single_image_as_array(tstamp):
+            return reader.read_block(start=tstamp, end=tstamp)[varname].values[
+                0, ...
+            ]
 
-        tmp_chunks = []
-        tmp_dask_chunks = []
-        for j in range(len(chunks)):
-            _tmp_chunks = list(chunks[j][:-1])
-            _tmp_chunks.append(e - s)
-            _tmp_chunks = tuple(_tmp_chunks)
-            tmp_chunks.append(_tmp_chunks)
-
-        tmp_dask_chunks = list(dask_chunks[:-1])
-        tmp_dask_chunks.append(e - s)
-        tmp_dask_chunks = tuple(tmp_dask_chunks)
-        temporary_dask_chunks.append(tmp_dask_chunks)
-
-        outfile = Path(str(outfname) + f".tmp.{i}")
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="String decoding changed.*",
-                category=FutureWarning,
+        shape = new_dim_sizes[:-1]
+        arrays = []
+        for t in timestamps:
+            arr = dsa.from_delayed(
+                dask.delayed(_get_single_image_as_array)(t), shape, dtype=dtype
             )
-            reader.read_block(
-                start=timestamps[s], end=timestamps[e - 1]
-            ).transpose(..., new_last_dim).chunk(
-                dict(zip(new_dim_names, tmp_dask_chunks))
-            ).to_netcdf(
-                outfile,
-                encoding={
-                    varname: {"chunksizes": tmp_chunks[j]}
-                    for j, varname in enumerate(reader.varnames)
-                },
-            )
+            arrays.append(arr)
+        all_data = dsa.stack(arrays).rechunk(dask_chunks)
 
-    if num_blocks == 1:
-        Path(str(outfname) + f".tmp.{i}").rename(outfname)
-    else:
-        datasets = []
-        for i in range(num_blocks):
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="String decoding changed.*",
-                    category=FutureWarning,
+        coords = {
+            c: first_img.coords[c]
+            for c in new_dim_names[:-1]
+            if c in first_img.coords
+        }
+        coords[reader.timename] = timestamps
+        ds = xr.Dataset(
+            {
+                varname: (
+                    input_dim_names,
+                    all_data,
+                    reader.array_metadata[varname],
                 )
-                ds = xr.open_dataset(
-                    str(outfname) + f".tmp.{i}",
-                    chunks=dict(zip(new_dim_names, temporary_dask_chunks[i])),
-                )
-                datasets.append(ds)
-        print("Concatenating intermediate files...")
-        final = xr.concat(
-            datasets,
-            dim=reader.timename,
-            compat="override",
-            data_vars="minimal",
-            coords="minimal",
-        ).chunk(dict(zip(new_dim_names, dask_chunks)))
-        final.attrs = reader.dataset_metadata
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="String decoding changed.*",
-                category=FutureWarning,
-            )
-            final.to_netcdf(
-                outfname,
-                encoding={
-                    varname: {
-                        "chunksizes": chunks[j],
-                        "zlib": zlib,
-                        "complevel": complevel,
-                    }
-                    for j, varname in enumerate(reader.varnames)
-                },
-            )
-        # remove temporary files
-        for i in range(num_blocks):
-            Path(str(outfname) + f".tmp.{i}").unlink()
+            },
+            coords=coords,
+        )
+        ds.attrs.update(reader.dataset_metadata)
+        ds = ds.transpose(..., reader.timename)
+        ds.to_zarr(
+            str(outfname) + f".{varname}.zarr", mode="w", consolidated=True
+        )
 
+        # now we can convert to netCDF
+        ds = xr.open_zarr(str(outfname) + ".tmp.zarr", consolidated=True)
+        variable_datasets.append(ds)
+
+    ds = xr.merge(variable_datasets)
+    ds.to_netcdf(
+        outfname,
+        encoding={
+            varname: {
+                "chunksizes": chunks[j],
+                "zlib": zlib,
+                "complevel": complevel,
+            }
+            for j, varname in enumerate(reader.varnames)
+        },
+    )
+    reader.grid = grid
     logging.info("create_transposed_netcdf: Finished writing transposed file.")
+

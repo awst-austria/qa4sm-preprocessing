@@ -2,7 +2,7 @@ import numpy as np
 from pathlib import Path
 import pytest
 import shutil
-import h5netcdf
+import netCDF4
 import xarray as xr
 
 from qa4sm_preprocessing.nc_image_reader.readers import GriddedNcOrthoMultiTs, XarrayTSReader
@@ -44,7 +44,7 @@ def test_transpose_lis(cli_args_lis, lis_noahmp_stacked):
         / "201703"
         / "LIS_HIST_201703300000.d01.nc"
     )
-    with h5netcdf.File(outpath, "r", decode_vlen_strings=False) as ds:
+    with netCDF4.Dataset(outpath, "r", decode_vlen_strings=False) as ds:
         assert ds["SoilMoist_inst"].dimensions == ("lat", "lon", "time")
         assert ds["SoilMoist_inst"].shape == (100, 50, 6)
         np.testing.assert_allclose(
@@ -101,7 +101,7 @@ def test_transpose_cmip(cli_args_cmip, cmip_ds):
     outpath = Path(args[1])
     transpose(args)
     ref = cmip_ds.sel(lat=slice(20, 30), lon=slice(90, 100))
-    with h5netcdf.File(outpath, "r", decode_vlen_strings=False) as ds:
+    with netCDF4.Dataset(outpath, "r", decode_vlen_strings=False) as ds:
         assert ds["mrsos"].dimensions == ("lat", "lon", "time")
         assert ds["mrsos"].shape == (14, 15, 9)
         np.testing.assert_allclose(

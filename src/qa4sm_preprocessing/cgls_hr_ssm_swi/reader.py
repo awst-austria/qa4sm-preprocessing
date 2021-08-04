@@ -47,7 +47,8 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
         grid = load_grid(grid_path, kd_tree_name='scipy')
 
         if not isinstance(parameter, str):
-            raise NotImplementedError("Currently it is not possible to read more than 1 parameter")
+            raise NotImplementedError("Currently it is not possible to read "
+                                      "more than 1 parameter")
 
         kwargs = {'ioclass_kws' : {'read_bulk': True}, 'parameters': parameter}
         super(S1CglsTs, self).__init__(ts_path, grid, **kwargs)
@@ -55,8 +56,12 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
         self.grid: pygeogrids.CellGrid
 
         self.parameter = parameter
-        self.celldata = {}  # stores data for up to 6 cells, cell number as key
-                            # data as dataframe with gpis as columns for the param
+
+        # stores data for up to 6 cells, cell number as key
+        # data as dataframe with gpis as columns for the param
+        # not used when the read  function from the parent
+        # class is used (when HR grid is reference)
+        self.celldata = {}
 
     def _read_cell(self, cell, drop_nan_ts=True) -> pd.DataFrame:
         """

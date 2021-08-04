@@ -6,7 +6,7 @@ import os
 import numpy as np
 import datetime
 
-testdata_path = os.path.join(os.path.dirname(__file__), "../test-data")
+testdata_path = os.path.join(os.path.dirname(__file__), "..", "test-data", "preprocessing")
 
 def is_asc(a):
     return np.all(a[:-1] <= a[1:])

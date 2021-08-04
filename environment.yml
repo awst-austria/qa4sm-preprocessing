@@ -5,7 +5,7 @@ channels:
 dependencies:
   - pandas
   - numpy
-  - xarray
+  - defaults::xarray
   - dask
   - netcdf4
   - pyresample

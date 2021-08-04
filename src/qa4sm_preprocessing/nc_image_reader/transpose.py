@@ -201,7 +201,7 @@ def _transpose(
                 )
 
             def _get_single_image_as_array(tstamp):
-                img = reader._read_block([tstamp])[varname]
+                img = reader.read_block(tstamp, tstamp)[varname]
                 return img.data[0, ...]
 
             for t in timestamps:

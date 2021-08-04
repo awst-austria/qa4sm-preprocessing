@@ -385,7 +385,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Directory in which the netcdf files are located. Any file matching
         `pattern` within this directory or any subdirectories is used.
     varnames : str or list of str
-        Names of the variables that should be read.
+        Names of the variables that should be read. If `rename` is used, this
+        should be the new names.
     level : dict, optional
         If a variable has more dimensions than latitude, longitude, time (or
         location, time), e.g. a level dimension, a single value for each
@@ -462,6 +463,13 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
+    rename : dict, optional
+        Dictionary to use to rename variables in the file. This is applied
+        before anything else, so all other parameters referring to variable
+        names should use the new names.
+    use_dask: bool, optional
+        Whether to open image files using dask. This might be useful in case
+        you run into memory issues.
     """
 
     def __init__(
@@ -483,6 +491,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        rename: dict = None,
+        use_dask: bool = False,
     ):
 
         # first, we walk over the whole directory subtree and find any files
@@ -499,7 +509,17 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                 f"{str(directory)}"
             )
 
+        # We need to read the first file so that the parent constructor can
+        # deduce the grid from it.
         ds = xr.open_dataset(next(iter(filepaths.values())))
+        self.rename = rename
+        if self.rename is not None:
+            ds = ds.rename(self.rename)
+
+        if use_dask:
+            self.chunks = -1
+        else:
+            self.chunks = None
 
         # now we can call the parent constructor using the dataset from the
         # first file
@@ -560,7 +580,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         self.timestamps = sorted(list(self.filepaths))
 
     def _read_image(self, timestamp):
-        ds = xr.open_dataset(self.filepaths[timestamp])
+        ds = xr.open_dataset(self.filepaths[timestamp], chunks=self.chunks)
+        if self.rename is not None:
+            ds = ds.rename(self.rename)
         return ds
 
 
@@ -632,6 +654,9 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
+    use_dask: bool, optional
+        Whether to open image files using dask. This might be useful in case
+        you run into memory issues. Only used in case `ds` is only a pathname.
     """
 
     def __init__(
@@ -650,10 +675,15 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        use_dask: bool = False,
     ):
 
         if isinstance(ds, (str, Path)):
-            ds = xr.open_dataset(ds)
+            if use_dask:
+                chunks = "auto"
+            else:
+                chunks = None
+            ds = xr.open_dataset(ds, chunks=chunks)
         super().__init__(
             ds,
             varnames,

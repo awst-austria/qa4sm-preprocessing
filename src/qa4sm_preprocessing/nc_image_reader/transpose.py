@@ -7,12 +7,14 @@ import math
 from multiprocessing.pool import ThreadPool
 import numpy as np
 from pathlib import Path
-from typing import Union, Tuple, TypeVar
-import warnings
+from typing import Union, TypeVar
 import xarray as xr
+import shutil
+import warnings
 
 
 from .utils import infer_chunks
+from qa4sm_preprocessing.nc_image_reader.readers import DirectoryImageReader
 
 
 Reader = TypeVar("Reader")
@@ -116,7 +118,8 @@ def _transpose(
     grid = reader.grid
     reader.grid = None
 
-    variable_datasets = []
+    variable_fnames = []
+    variable_chunks = []
     for varname in reader.varnames:
 
         # first, get some info about structure of the input file
@@ -144,6 +147,7 @@ def _transpose(
 
         # netCDF chunks should be about 1MB in size
         chunks = infer_chunks(new_dim_sizes, 1, dtype)
+        variable_chunks.append(chunks)
         size = dtype.itemsize
         chunksize_MB = np.prod(chunks) * size / 1024 ** 2
         logging.info(
@@ -171,44 +175,68 @@ def _transpose(
         dask_chunks = [stepsize] + tmp_dask_chunks[:-1]
         dask_chunks = tuple(dask_chunks)
 
-        def _get_single_image_as_array(tstamp):
-            return reader.read_block(start=tstamp, end=tstamp)[varname].values[
-                0, ...
-            ]
+        tmp_outfname = str(outfname) + f".{varname}.zarr"
+        variable_fnames.append(tmp_outfname)
 
-        shape = new_dim_sizes[:-1]
-        arrays = []
-        for t in timestamps:
-            arr = dsa.from_delayed(
-                dask.delayed(_get_single_image_as_array)(t), shape, dtype=dtype
+        if not Path(tmp_outfname).exists():
+            arrays = []
+            logging.debug(
+                f"create_transposed_netcdf: starting dask array creation"
+                f" for {len(timestamps)} timestamps"
             )
-            arrays.append(arr)
-        all_data = dsa.stack(arrays).rechunk(dask_chunks)
 
-        coords = {
-            c: first_img.coords[c]
-            for c in new_dim_names[:-1]
-            if c in first_img.coords
-        }
-        coords[reader.timename] = timestamps
-        ds = xr.Dataset(
-            {
-                varname: (
-                    input_dim_names,
-                    all_data,
-                    reader.array_metadata[varname],
+            # I had issues with memory leaks, probably related to
+            # https://github.com/dask/dask/issues/3530
+            # when using the from_delayed approach that got blocks as numpy
+            # arrays.
+            # The reader should probably have set use_dask, so that dask arrays
+            # are returned by _get_single_image_as_array
+            if (
+                isinstance(reader, DirectoryImageReader)
+                and reader.chunks is None
+            ):
+                warnings.warn(
+                    "Not reading single images as dask arrays. If you run into memory"
+                    " issues, use the `use_dask=True` option for your reader."
                 )
-            },
-            coords=coords,
-        )
-        ds.attrs.update(reader.dataset_metadata)
-        ds = ds.transpose(..., reader.timename)
-        ds.to_zarr(
-            str(outfname) + f".{varname}.zarr", mode="w", consolidated=True
-        )
 
+            def _get_single_image_as_array(tstamp):
+                img = reader._read_block([tstamp])[varname]
+                return img.data[0, ...]
+
+            for t in timestamps:
+                arr = _get_single_image_as_array(t)
+                arrays.append(arr)
+
+            logging.debug("create_transposed_netcdf: stacking")
+            all_data = dsa.stack(arrays).rechunk(dask_chunks)
+
+            coords = {
+                c: first_img.coords[c]
+                for c in new_dim_names[:-1]
+                if c in first_img.coords
+            }
+            coords[reader.timename] = timestamps
+            ds = xr.Dataset(
+                {
+                    varname: (
+                        input_dim_names,
+                        all_data,
+                        reader.array_metadata[varname],
+                    )
+                },
+                coords=coords,
+            )
+            ds.attrs.update(reader.dataset_metadata)
+            logging.debug("create_transposed_netcdf: transpose")
+            ds = ds.transpose(..., reader.timename)
+            logging.debug(f"create_transposed_netcdf: Writing {tmp_outfname}")
+            ds.to_zarr(tmp_outfname, mode="w", consolidated=True)
+
+    variable_datasets = []
+    for fname in variable_fnames:
         # now we can convert to netCDF
-        ds = xr.open_zarr(str(outfname) + ".tmp.zarr", consolidated=True)
+        ds = xr.open_zarr(fname, consolidated=True)
         variable_datasets.append(ds)
 
     ds = xr.merge(variable_datasets)
@@ -216,7 +244,7 @@ def _transpose(
         outfname,
         encoding={
             varname: {
-                "chunksizes": chunks[j],
+                "chunksizes": variable_chunks[j],
                 "zlib": zlib,
                 "complevel": complevel,
             }
@@ -224,5 +252,6 @@ def _transpose(
         },
     )
     reader.grid = grid
+    for fname in variable_fnames:
+        shutil.rmtree(fname)
     logging.info("create_transposed_netcdf: Finished writing transposed file.")
-

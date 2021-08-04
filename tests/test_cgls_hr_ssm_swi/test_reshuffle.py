@@ -6,7 +6,7 @@ import numpy as np
 
 from qa4sm_preprocessing.cgls_hr_ssm_swi.reshuffle import reshuffle
 
-testdata_path = os.path.join(os.path.dirname(__file__), "../test-data")
+testdata_path = os.path.join(os.path.dirname(__file__), "..", "test-data", "preprocessing")
 
 def test_reshuffle_swi():
     # here we actually re-define the time stamps, 0:00, not 12:00 as in the

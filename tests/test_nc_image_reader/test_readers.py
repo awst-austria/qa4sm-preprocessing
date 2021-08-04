@@ -127,7 +127,7 @@ def test_time_regex():
 
 def test_read_block(default_directory_reader):
     block = default_directory_reader.read_block()["SoilMoist_inst"]
-    assert block.shape == (6, 168, 207)
+    assert block.shape == (6, 100, 50)
 
     reader = XarrayImageReader(
         block.to_dataset(name="SoilMoist_inst"), "SoilMoist_inst"
@@ -138,7 +138,7 @@ def test_read_block(default_directory_reader):
     block = default_directory_reader.read_block(
         start=start_date, end=start_date
     )["SoilMoist_inst"]
-    assert block.shape == (1, 168, 207)
+    assert block.shape == (1, 100, 50)
 
 
 ###############################################################################
@@ -185,20 +185,20 @@ def test_bbox_landmask_cellsize(cmip_ds):
     # normal reader without bbox or landmask
     reader = XarrayImageReader(cmip_ds, "mrsos", cellsize=5.0)
     assert len(reader.grid.activegpis) == num_gpis
-    assert len(np.unique(reader.grid.activearrcell)) == 2592
+    assert len(np.unique(reader.grid.activearrcell)) == 100
     block = reader.read_block()["mrsos"]
     np.testing.assert_allclose(block.values, cmip_ds.mrsos.values)
 
-    # now with bbox using only Europe
-    min_lon = -11
-    min_lat = 34
-    max_lon = 48
-    max_lat = 72
+    # now with bbox
+    min_lon = 90
+    min_lat = 20
+    max_lon = 100
+    max_lat = 30
     bbox = [min_lon, min_lat, max_lon, max_lat]
     reader = XarrayImageReader(cmip_ds, "mrsos", bbox=bbox, cellsize=5.0)
-    num_gpis_europe = len(reader.grid.activegpis)
-    assert num_gpis_europe < num_gpis
-    assert len(np.unique(reader.grid.activearrcell)) == 117
+    num_gpis_box = len(reader.grid.activegpis)
+    assert num_gpis_box < num_gpis
+    assert len(np.unique(reader.grid.activearrcell)) == 4
     assert not np.any(reader.grid.arrlon < min_lon)
     assert not np.any(reader.grid.arrlat < min_lat)
     assert not np.any(reader.grid.arrlon > max_lon)
@@ -215,8 +215,8 @@ def test_bbox_landmask_cellsize(cmip_ds):
     reader = XarrayImageReader(
         cmip_ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
     )
-    assert len(reader.grid.activegpis) < num_gpis_europe
-    assert len(np.unique(reader.grid.activearrcell)) == 88
+    assert len(reader.grid.activegpis) < num_gpis
+    assert len(np.unique(reader.grid.activearrcell)) == 4
     assert not np.any(reader.grid.arrlon < min_lon)
     assert not np.any(reader.grid.arrlat < min_lat)
     assert not np.any(reader.grid.arrlon > max_lon)
@@ -234,8 +234,8 @@ def test_bbox_landmask_cellsize(cmip_ds):
     reader = XarrayImageReader(
         ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
     )
-    assert len(reader.grid.activegpis) < num_gpis_europe
-    assert len(np.unique(reader.grid.activearrcell)) == 88
+    assert len(reader.grid.activegpis) < num_gpis
+    assert len(np.unique(reader.grid.activearrcell)) == 4
     assert not np.any(reader.grid.arrlon < min_lon)
     assert not np.any(reader.grid.arrlat < min_lat)
     assert not np.any(reader.grid.arrlon > max_lon)

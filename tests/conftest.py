@@ -12,7 +12,7 @@ here = Path(__file__).resolve().parent
 
 
 def pytest_configure():
-    pytest.test_data_path = here / "test-data"
+    pytest.test_data_path = here / "test-data" / "preprocessing"
 
 
 @pytest.fixture

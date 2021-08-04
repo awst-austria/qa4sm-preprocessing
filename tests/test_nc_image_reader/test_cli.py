@@ -46,7 +46,7 @@ def test_transpose_lis(cli_args_lis, lis_noahmp_stacked):
     )
     with h5netcdf.File(outpath, "r", decode_vlen_strings=False) as ds:
         assert ds["SoilMoist_inst"].dimensions == ("lat", "lon", "time")
-        assert ds["SoilMoist_inst"].shape == (168, 207, 6)
+        assert ds["SoilMoist_inst"].shape == (100, 50, 6)
         np.testing.assert_allclose(
             ds["SoilMoist_inst"][..., 0],
             ref["SoilMoist_inst"].isel(SoilMoist_profiles=0).values,
@@ -90,7 +90,7 @@ def cli_args_cmip(test_output_path):
         "1970-01-01T00:00",
         "1970-01-10T00:00",
         *("--parameter", "mrsos"),
-        *("--bbox", "10", "34", "43", "71"),
+        *("--bbox", "90", "20", "100", "30"),
         *("--landmask", f"{str(landmask_path)}:landmask"),
     ]
 
@@ -100,10 +100,10 @@ def test_transpose_cmip(cli_args_cmip, cmip_ds):
     args[1] = args[1] + "/cmip_transposed.nc"
     outpath = Path(args[1])
     transpose(args)
-    ref = cmip_ds.sel(lat=slice(34, 71), lon=slice(10, 43))
+    ref = cmip_ds.sel(lat=slice(20, 30), lon=slice(90, 100))
     with h5netcdf.File(outpath, "r", decode_vlen_strings=False) as ds:
         assert ds["mrsos"].dimensions == ("lat", "lon", "time")
-        assert ds["mrsos"].shape == (53, 47, 9)
+        assert ds["mrsos"].shape == (14, 15, 9)
         np.testing.assert_allclose(
             ds["mrsos"][..., 0], ref["mrsos"].values[0, ...],
         )
@@ -121,7 +121,7 @@ def test_repurpose_cmip(cli_args_cmip, cmip_ds):
     outpath = Path(cli_args_cmip[1])
     repurpose(cli_args_cmip)
     reader = GriddedNcOrthoMultiTs(outpath)
-    ref_ds = cmip_ds.sel(lat=slice(34, 71), lon=slice(10, 43))
+    ref_ds = ref = cmip_ds.sel(lat=slice(20, 30), lon=slice(90, 100))
     ref = XarrayTSReader(ref_ds, "mrsos")
     # not comparing the grid GPIs here, because for "repurpose", the grid
     # started of as a global grid, from which a bbox was selected, while for

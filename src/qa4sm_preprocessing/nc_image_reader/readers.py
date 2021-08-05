@@ -9,6 +9,7 @@ import fnmatch
 import logging
 import numpy as np
 import os
+import glob
 import pandas as pd
 from pathlib import Path
 import re
@@ -167,8 +168,16 @@ class XarrayReaderBase:
             coord = np.array([start + i * step for i in range(dimlen)])
         else:
             # infer coordinate from variable in dataset
-            othername = "lon" if coordname == "lat" else "lat"
-            coord = ds[cname].isel({getattr(self, othername + "dim"): 0})
+            coord = ds[cname]
+            if len(coord.dims) > 1:
+                othername = "lon" if coordname == "lat" else "lat"
+                other_cname = getattr(self, othername + "dim")
+                warnings.warn(
+                    f"{cname} has more than one dimension, using values for"
+                    f" {other_cname} index = 0"
+                )
+                coord = coord.isel({other_cname: 0})
+            coord = coord.rename({dimname: cname})
             if np.any(np.isnan(coord)):  # pragma: no cover
                 raise ReaderError(
                     f"Inferred coordinate values for {coordname}"
@@ -178,9 +187,9 @@ class XarrayReaderBase:
                 )
         return xr.DataArray(
             coord,
-            coords={self.latname: coord},
-            dims=[self.latname],
-            name=self.latname,
+            coords={cname: coord},
+            dims=[cname],
+            name=cname,
         )
 
     def _select_vars_levels(self, ds):
@@ -376,7 +385,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Directory in which the netcdf files are located. Any file matching
         `pattern` within this directory or any subdirectories is used.
     varnames : str or list of str
-        Names of the variables that should be read.
+        Names of the variables that should be read. If `rename` is used, this
+        should be the new names.
     level : dict, optional
         If a variable has more dimensions than latitude, longitude, time (or
         location, time), e.g. a level dimension, a single value for each
@@ -453,6 +463,13 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
+    rename : dict, optional
+        Dictionary to use to rename variables in the file. This is applied
+        before anything else, so all other parameters referring to variable
+        names should use the new names.
+    use_dask: bool, optional
+        Whether to open image files using dask. This might be useful in case
+        you run into memory issues.
     """
 
     def __init__(
@@ -474,16 +491,17 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        rename: dict = None,
+        use_dask: bool = False,
     ):
 
         # first, we walk over the whole directory subtree and find any files
         # that match our pattern
         directory = Path(directory)
         filepaths = {}
-        for root, dirs, files in os.walk(directory):
-            for fname in files:
-                if fnmatch.fnmatch(fname, pattern):
-                    filepaths[fname] = Path(root) / fname
+        for fpath in glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True):
+            fname = Path(fpath).name
+            filepaths[fname] = fpath
 
         if not filepaths:  # pragma: no cover
             raise ReaderError(
@@ -491,7 +509,17 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                 f"{str(directory)}"
             )
 
+        # We need to read the first file so that the parent constructor can
+        # deduce the grid from it.
         ds = xr.open_dataset(next(iter(filepaths.values())))
+        self.rename = rename
+        if self.rename is not None:
+            ds = ds.rename(self.rename)
+
+        if use_dask:
+            self.chunks = -1
+        else:
+            self.chunks = None
 
         # now we can call the parent constructor using the dataset from the
         # first file
@@ -552,7 +580,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         self.timestamps = sorted(list(self.filepaths))
 
     def _read_image(self, timestamp):
-        ds = xr.open_dataset(self.filepaths[timestamp])
+        ds = xr.open_dataset(self.filepaths[timestamp], chunks=self.chunks)
+        if self.rename is not None:
+            ds = ds.rename(self.rename)
         return ds
 
 
@@ -624,6 +654,9 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
+    use_dask: bool, optional
+        Whether to open image files using dask. This might be useful in case
+        you run into memory issues. Only used in case `ds` is only a pathname.
     """
 
     def __init__(
@@ -642,10 +675,15 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        use_dask: bool = False,
     ):
 
         if isinstance(ds, (str, Path)):
-            ds = xr.open_dataset(ds)
+            if use_dask:
+                chunks = "auto"
+            else:
+                chunks = None
+            ds = xr.open_dataset(ds, chunks=chunks)
         super().__init__(
             ds,
             varnames,
@@ -869,7 +907,6 @@ class XarrayTSReader(XarrayReaderBase):
         -------
         df : pd.DataFrame
         """
-
         if len(args) == 1:
             gpi = args[0]
             if self._has_regular_grid:
@@ -893,5 +930,5 @@ class XarrayTSReader(XarrayReaderBase):
             data = self.orig_data.sel(lat=lat, lon=lon)
         else:
             data = self.data[{self.locdim: gpi}]
-        df = data.to_pandas()
+        df = data.to_pandas()[self.varnames]
         return df

@@ -1,6 +1,4 @@
-[submodule "test-data"]
-	path = test-data
-	url = git@github.com:awst-austria/qa4sm-testdata.git
 [submodule "tests/test-data"]
 	path = tests/test-data
-	url = git@github.com:awst-austria/qa4sm-testdata.git
+    url = https://github.com/awst-austria/qa4sm-testdata.git
+

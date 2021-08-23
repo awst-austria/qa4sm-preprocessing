@@ -182,12 +182,11 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             cell = self.grid.gpi2cell(gpi)
             try:
                 if cell in self.celldata.keys():
-                    return self.celldata[cell][[gpi]]
+                    return self.celldata[cell][[gpi]].rename(columns={gpi: self.parameters[0]})
                 else:
                     return self._read_gps([gpi])
             except KeyError:
-                return self.read(*args).rename(columns={self.parameters[0]: gpi})
-
+                return self.read(*args)
         if area.lower() == 'square':
             gpis = self.grid.get_bbox_grid_points(lat-radius,
                                                   lat+radius,

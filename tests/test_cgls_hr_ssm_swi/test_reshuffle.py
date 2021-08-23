@@ -47,6 +47,13 @@ def test_reshuffle_swi():
         ts_average = ds.read_area(-0.962, 44.918, radius=10000, area='circle', average=True)
         np.testing.assert_equal(ts_multi.mean(axis=1).values, ts_average['SWI_005'].values)
 
+        # test case when there are no points in the radius
+        empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=False)
+        also_empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=True)
+        assert all([empty_df.empty, also_empty_df.empty])
+
+
+
 
 def test_reshuffle_ssm():
     startdate = datetime.datetime(2017,6,1)
@@ -80,3 +87,7 @@ def test_reshuffle_ssm():
         np.testing.assert_equal(ts_multi.mean(axis=1).values,
                                 ts_average['ssm'].values)
 
+        # test case when there are no points in the radius
+        empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=False)
+        also_empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=True)
+        assert all([empty_df.empty, also_empty_df.empty])

@@ -124,7 +124,10 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
 
         gpis = sorted(gpis)
 
-        cells = np.unique(self.grid.gpi2cell(gpis))
+        if len(gpis) > 0:
+            cells = np.unique(self.grid.gpi2cell(gpis))
+        else:
+            cells = np.array([])
 
         if len(cells) > 3:
             warnings.warn('Reading needs data from more than 3 cells!')
@@ -134,9 +137,12 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             celldata = self._read_cell(cell, drop_nan_ts=True)
             data.append(celldata[np.intersect1d(celldata.columns, gpis)])
 
-        data = pd.concat(data, axis=1)
+        if len(data) == 0:
+            data = pd.DataFrame()
+        else:
+            data = pd.concat(data, axis=1)
 
-        if applyf is not None:
+        if applyf is not None and not data.empty:
             data = data.apply(applyf, axis=1, **applyf_kwargs)
             data = data.to_frame(name=self.parameters[0])
             data = pd.DataFrame(data)
@@ -190,8 +196,12 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
         elif area.lower() == 'circle':
             # if self.grid.kdTree is None:
             #     self.grid._setup_kdtree()
-            gpis, dist  = self.grid.find_k_nearest_gpi(
-                lon, lat, max_dist=radius, k=None)
+            try:
+                # find all points within radius
+                gpis, dist  = self.grid.find_k_nearest_gpi(
+                    lon, lat, max_dist=radius, k=None)
+            except ValueError:  # when no points were found in radius
+                gpis = np.array([])
         else:
             raise NotImplementedError(f"{area} is not supported.")
 

@@ -138,7 +138,7 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             data.append(celldata[np.intersect1d(celldata.columns, gpis)])
 
         if len(data) == 0:
-            data = pd.DataFrame()
+            data = pd.DataFrame(columns=self.parameters)
         else:
             data = pd.concat(data, axis=1)
 

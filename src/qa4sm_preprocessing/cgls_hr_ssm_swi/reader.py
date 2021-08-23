@@ -182,9 +182,11 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             cell = self.grid.gpi2cell(gpi)
             try:
                 if cell in self.celldata.keys():
+                    # single point from internal cache
                     return self.celldata[cell][[gpi]].rename(columns={gpi: self.parameters[0]})
                 else:
-                    return self._read_gps([gpi])
+                    # single point when no cache yet exists
+                    return self._read_gps([gpi]).rename(columns={gpi: self.parameters[0]})
             except KeyError:
                 return self.read(*args)
         if area.lower() == 'square':

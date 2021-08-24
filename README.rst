@@ -2,6 +2,15 @@
 qa4sm-preprocessing
 ===================
 
+.. image:: https://github.com/awst-austria/qa4sm-preprocessing/workflows/Automated%20Tests/badge.svg?branch=master&event=push
+   :target: https://github.com/awst-austria/qa4sm-preprocessing/actions
+
+.. image:: https://coveralls.io/repos/awst-austria/qa4sm-preprocessing/badge.png?branch=master
+  :target: https://coveralls.io/r/awst-austria/qa4sm-preprocessing?branch=master
+
+.. image:: https://badge.fury.io/py/qa4sm-preprocessing.svg
+    :target: https://badge.fury.io/py/qa4sm-preprocessing
+
 
 This package contains functions to preprocess certain data before using them
 in the QA4SM online validation framework.

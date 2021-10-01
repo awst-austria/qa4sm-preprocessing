@@ -248,7 +248,6 @@ class XarrayImageReaderMixin:
             timestamp = mkdate(timestamp)
 
         if timestamp in self.timestamps:
-            images = {}
             img = self._select_vars_levels(self._read_image(timestamp))
             # check if dimensions are as expected and potentially select from
             # non lat/lon/time dimensions
@@ -339,7 +338,10 @@ class XarrayImageReaderMixin:
             A block of the dataset. In case of a regular grid, this will have
             ``self.latname`` and ``self.lonname`` as dimensions.
         """
-        timestamps = self.tstamps_for_daterange(start, end)
+        if start == end and start is not None:
+            timestamps = [start]
+        else:
+            timestamps = self.tstamps_for_daterange(start, end)
         block = self._read_block(timestamps)
         # we might need to apply the landmask, this is applied before renaming
         # the coordinates, because it is in the original coordinates

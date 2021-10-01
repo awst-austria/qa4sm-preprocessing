@@ -24,7 +24,7 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
     Read CGLS SSM and SWI Time Series from reshuffled images.
     """
 
-    def __init__(self, ts_path, parameter,
+    def __init__(self, ts_path, parameters,
                  grid_path=None):
         """
         Parameters
@@ -35,7 +35,7 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             This means that the up to 4 cells around a point will be kept in
             the cache. This can require a lot of memory (up to ~12 GB) but makes
             reading faster.
-        parameter : str, optional (default: None)
+        parameters : str, optional (default: None)
             Parameter(s) to read from files. None reads all parameters.
         grid_path : str, optional (default: None)
             Path to the grid.nc file, if None is passed, grid.nc is searched
@@ -46,16 +46,16 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
 
         grid = load_grid(grid_path, kd_tree_name='scipy')
 
-        if not isinstance(parameter, str):
+        if not isinstance(parameters, str):
             raise NotImplementedError("Currently it is not possible to read "
                                       "more than 1 parameter")
 
-        kwargs = {'ioclass_kws' : {'read_bulk': True}, 'parameters': parameter}
+        kwargs = {'ioclass_kws' : {'read_bulk': True}, 'parameters': parameters}
         super(S1CglsTs, self).__init__(ts_path, grid, **kwargs)
 
         self.grid: pygeogrids.CellGrid
 
-        self.parameter = parameter
+        self.parameters = [parameters]
 
         # stores data for up to 6 cells, cell number as key
         # data as dataframe with gpis as columns for the param
@@ -89,7 +89,7 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
                 since = pd.Timestamp(unit_time.split('since ')[1])
                 time = since + vfunc(time)
 
-                variable = ncfile.variables[self.parameter][:]
+                variable = ncfile.variables[self.parameters[0]][:]
                 variable = np.transpose(variable)
                 data = pd.DataFrame(variable, columns=loc_id, index=time)
 
@@ -124,7 +124,10 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
 
         gpis = sorted(gpis)
 
-        cells = np.unique(self.grid.gpi2cell(gpis))
+        if len(gpis) > 0:
+            cells = np.unique(self.grid.gpi2cell(gpis))
+        else:
+            cells = np.array([])
 
         if len(cells) > 3:
             warnings.warn('Reading needs data from more than 3 cells!')
@@ -134,11 +137,14 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             celldata = self._read_cell(cell, drop_nan_ts=True)
             data.append(celldata[np.intersect1d(celldata.columns, gpis)])
 
-        data = pd.concat(data, axis=1)
+        if len(data) == 0:
+            data = pd.DataFrame(columns=self.parameters)
+        else:
+            data = pd.concat(data, axis=1)
 
-        if applyf is not None:
+        if applyf is not None and not data.empty:
             data = data.apply(applyf, axis=1, **applyf_kwargs)
-            data = data.to_frame(name=self.parameter)
+            data = data.to_frame(name=self.parameters[0])
             data = pd.DataFrame(data)
 
         return data
@@ -176,12 +182,13 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             cell = self.grid.gpi2cell(gpi)
             try:
                 if cell in self.celldata.keys():
-                    return self.celldata[cell][[gpi]]
+                    # single point from internal cache
+                    return self.celldata[cell][[gpi]].rename(columns={gpi: self.parameters[0]})
                 else:
-                    return self._read_gps([gpi])
+                    # single point when no cache yet exists
+                    return self._read_gps([gpi]).rename(columns={gpi: self.parameters[0]})
             except KeyError:
-                return self.read(*args).rename(columns={self.parameter: gpi})
-
+                return self.read(*args)
         if area.lower() == 'square':
             gpis = self.grid.get_bbox_grid_points(lat-radius,
                                                   lat+radius,
@@ -190,8 +197,12 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
         elif area.lower() == 'circle':
             # if self.grid.kdTree is None:
             #     self.grid._setup_kdtree()
-            gpis, dist  = self.grid.find_k_nearest_gpi(
-                lon, lat, max_dist=radius, k=None)
+            try:
+                # find all points within radius
+                gpis, dist  = self.grid.find_k_nearest_gpi(
+                    lon, lat, max_dist=radius, k=None)
+            except ValueError:  # when no points were found in radius
+                gpis = np.array([])
         else:
             raise NotImplementedError(f"{area} is not supported.")
 
@@ -199,8 +210,3 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             return self._read_gps(gpis, applyf=pd.DataFrame.mean, skipna=True)
         else:
             return self._read_gps(gpis)
-
-if __name__ == '__main__':
-    ds = S1CglsTs("/home/wpreimes/shares/radar/Projects/QA4SM_HR/07_data/testdata/CGLS_SWI_TS_synthetic_hawaii/",
-                  parameter='SWI_005')
-    ts = ds.read(-155.4991149902344, 19.84422706794513)

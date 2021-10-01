@@ -30,7 +30,7 @@ def test_reshuffle_swi():
                   hours=(0,),
                   datetime_format = "%Y%m%d")
         assert len(os.listdir(out_path)) == 2
-        ds = S1CglsTs(out_path, parameter='SWI_005')
+        ds = S1CglsTs(out_path, parameters='SWI_005')
         assert ds.grid.get_grid_points()[0].size == 4
         ts = ds.read(-0.95982, 44.9151)
         assert ts.loc['2017-06-02', 'SWI_005'] == 53.5
@@ -47,6 +47,13 @@ def test_reshuffle_swi():
         ts_average = ds.read_area(-0.962, 44.918, radius=10000, area='circle', average=True)
         np.testing.assert_equal(ts_multi.mean(axis=1).values, ts_average['SWI_005'].values)
 
+        # test case when there are no points in the radius
+        empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=False)
+        also_empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=True)
+        assert all([empty_df.empty, also_empty_df.empty])
+
+
+
 
 def test_reshuffle_ssm():
     startdate = datetime.datetime(2017,6,1)
@@ -62,7 +69,7 @@ def test_reshuffle_ssm():
                   hours=(0,),
                   datetime_format = "%Y%m%d%H%M")
         assert len(os.listdir(out_path)) == 2
-        ds = S1CglsTs(out_path, parameter='ssm')
+        ds = S1CglsTs(out_path, parameters='ssm')
         assert ds.grid.get_grid_points()[0].size == 4
         ts = ds.read(-0.95982, 44.9151)
         assert ts.loc['2017-06-03', 'ssm'] == 57.5
@@ -80,3 +87,7 @@ def test_reshuffle_ssm():
         np.testing.assert_equal(ts_multi.mean(axis=1).values,
                                 ts_average['ssm'].values)
 
+        # test case when there are no points in the radius
+        empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=False)
+        also_empty_df = ds.read_area(-0.9, 45, radius=100, area='circle', average=True)
+        assert all([empty_df.empty, also_empty_df.empty])

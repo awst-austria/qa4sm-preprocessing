@@ -14,12 +14,13 @@ on:
 
 jobs:
   build:
-    name: Build py${{ matrix.python-version }} @ ${{ matrix.os }} 🐍
-    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ['3.6', '3.8']
+        python-version: ['3.6', '3.9']  # make sure that the qa4sm python version is included
         os: ["ubuntu-latest"]
+        ymlfile: ['environment.yml']
+    name: Build py${{ matrix.python-version }} @ ${{ matrix.os }} 🐍
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v2
@@ -31,7 +32,7 @@ jobs:
           miniconda-version: "latest"
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
-          environment-file: environment.yml
+          environment-file: ${{ matrix.ymlfile }}
           activate-environment: qa4sm_preprocessing
           auto-activate-base: false
       - name: Print environment infos
@@ -46,8 +47,11 @@ jobs:
         shell: bash -l {0}
         run: |
           mkdir -p .artifacts
-          filename=env_py${{ matrix.python-version }}_${{ matrix.os }}.yml
-          conda env export --no-builds | grep -v "prefix" > .artifacts/$filename
+          if [ ${{ matrix.ymlfile }} == "environment.yml" ]
+          then
+              filename=env_py${{ matrix.python-version }}_${{ matrix.os }}.yml
+              conda env export --no-builds | grep -v "prefix" > .artifacts/$filename
+          fi
       - name: Install package and test
         shell: bash -l {0}
         run: |
@@ -61,6 +65,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
           COVERALLS_PARALLEL: true
+      - name: Create wheel and dist package
+        shell: bash -l {0}
+        run: |
+          pip install setuptools_scm
+          python setup.py sdist --dist-dir .artifacts/dist
+          ls .artifacts/dist
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: Artifacts
+          path: .artifacts/*
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
         with:
@@ -77,3 +92,26 @@ jobs:
           pip3 install --upgrade coveralls && coveralls --service=github --finish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  publish:
+    name: Upload to PyPI
+    if: startsWith(github.ref, 'refs/tags/v') && startsWith(github.repository, 'awst-austria')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print environment variables
+        run: |
+          echo "GITHUB_REF = $GITHUB_REF"
+          echo "GITHUB_REPOSITORY = $GITHUB_REPOSITORY"
+      - name: Download Artifacts
+        uses: actions/download-artifact@v2
+      - name: Display downloaded files
+        run: ls -aR
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.4.1
+        with:
+          skip_existing: true
+          verbose: true
+          verify_metadata: true
+          packages_dir: Artifacts/dist/
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }} # this needs to be uploaded to github actions secrets

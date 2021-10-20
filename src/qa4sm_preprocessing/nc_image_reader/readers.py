@@ -128,7 +128,9 @@ class XarrayReaderBase:
         self.lon = self._get_coord(ds, "lon")
         if self._has_regular_grid:
             if self.curvilinear:
-                grid = BasicGrid(self.lon.values.ravel(), self.lat.values.ravel())
+                grid = BasicGrid(
+                    self.lon.values.ravel(), self.lat.values.ravel()
+                )
             else:
                 grid = gridfromdims(self.lon, self.lat)
         else:
@@ -398,13 +400,13 @@ class XarrayImageReaderMixin:
         #    - What to do: assign flat lat and lon arrays as coordinates
         if not self.curvilinear:
             if self.latdim is not None:
-                block = block.rename({self.latdim: self.latname}).assign_coords(
-                    {self.latname: self.lat.values}
-                )
+                block = block.rename(
+                    {self.latdim: self.latname}
+                ).assign_coords({self.latname: self.lat.values})
             if self.londim is not None:
-                block = block.rename({self.londim: self.lonname}).assign_coords(
-                    {self.lonname: self.lon.values}
-                )
+                block = block.rename(
+                    {self.londim: self.lonname}
+                ).assign_coords({self.lonname: self.lon.values})
         if self.locdim is not None:
             # add latitude and longitude as coordinates
             # if locdim is not None, latname and lonname have to be set
@@ -794,21 +796,35 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
 
 
 class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
-    def __init__(self, ts_path, grid_path=None, **kwargs):
+    def __init__(
+        self,
+        ts_path,
+        grid_path=None,
+        time_offset_name=None,
+        time_offset_unit="S",
+        **kwargs,
+    ):
         """
-        Class for reading time series after reshuffling.
+        Class for reading time series in pynetcf format after reshuffling.
 
         Parameters
         ----------
         ts_path : str
             Directory where the netcdf time series files are stored
-        grid_path : str, optional (default: None)
+        grid_path : str, optional
             Path to grid file, that is used to organize the location of time
             series to read. If None is passed, grid.nc is searched for in the
             ts_path.
+        time_offset_name : str, optional
+            Name of the variable containing time offsets for a given location
+            and time that is added to the timestamp. If given,
+            `time_offset_units` must also be given. Default is None.
+        time_offset_unit : str, optional
+            Unit of the time offset. Default is "S" for seconds. Have a look at
+            `pd.to_timedelta` for possible units.
 
-        Optional keyword arguments that are passed to the Gridded Base:
-        ---------------------------------------------------------------
+        Additional keyword arguments
+        ----------------------------
         parameters : list, optional (default: None)
             Specific variable names to read, if None are selected, all are
             read.
@@ -833,6 +849,18 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
             grid_path = os.path.join(ts_path, "grid.nc")
         grid = load_grid(grid_path)
         super().__init__(ts_path, grid, **kwargs)
+        self.time_offset_name = time_offset_name
+        self.time_offset_unit = time_offset_unit
+
+    def read(self, *args, **kwargs) -> pd.DataFrame:
+        df = super().read(*args, **kwargs)
+        if self.time_offset_name is not None:
+            delta = pd.to_timedelta(
+                df[self.time_offset_name].values, unit=self.time_offset_unit
+            )
+            df.index = df.index + delta
+            df.drop(self.time_offset_name, axis="columns", inplace=True)
+        return df
 
 
 class XarrayTSReader(XarrayReaderBase):

@@ -9,6 +9,8 @@ def mkdate(datestring):
         return datetime.datetime.strptime(datestring, "%Y-%m-%d")
     elif len(datestring) == 16:
         return datetime.datetime.strptime(datestring, "%Y-%m-%dT%H:%M")
+    elif len(datestring) == 19:
+        return datetime.datetime.strptime(datestring, "%Y-%m-%dT%H:%M:%S")
     else:  # pragma: no cover
         raise ValueError(f"Invalid date: {datestring}")
 

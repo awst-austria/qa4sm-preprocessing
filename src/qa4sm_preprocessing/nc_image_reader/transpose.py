@@ -8,7 +8,7 @@ from multiprocessing.pool import ThreadPool
 import numpy as np
 from pathlib import Path
 from tqdm.auto import tqdm
-from typing import Union, TypeVar, Tuple
+from typing import Union, TypeVar, Tuple, Sequence
 import xarray as xr
 import shutil
 import warnings
@@ -73,6 +73,9 @@ def create_transposed_netcdf(
         Whether to use the local or the distributed dask scheduler. If a client
         for a distributed scheduler is used, this is used instead.
     use_dask : bool, optional
+        Whether to use dask for the transposing. Default is True, but sometimes
+        (especially with large datasets) this fails. If set to False, the data
+        is written to an intermediate zarr store.
     """
     dask_config = {
         "array.slicing.split_large_chunks": False,
@@ -85,7 +88,7 @@ def create_transposed_netcdf(
         "memory": memory,
         "zlib": zlib,
         "complevel": complevel,
-        "chunks": chunks
+        "chunks": chunks,
     }
     if not use_dask:
         _transpose_no_dask(*args, **kwargs)
@@ -104,6 +107,11 @@ def create_transposed_netcdf(
         ) as client:
             print("Dask dashboard accessible at:", client.dashboard_link)
             _transpose(*args, **kwargs)
+
+
+def _get_additional_variables(reader, start, variables):
+    img = reader._read_image(start)
+    return {var: img[var] for var in variables}
 
 
 def _transpose(
@@ -263,6 +271,7 @@ def _transpose(
         }
         for j, varname in enumerate(reader.varnames)
     }
+
     if not zarr_output:
         ds.to_netcdf(outfname, encoding=encoding)
     else:
@@ -297,8 +306,6 @@ def _transpose_no_dask(
 
         tmp_outfname = str(outfname) + f".{varname}.zarr"
         variable_fnames[varname] = tmp_outfname
-        if Path(tmp_outfname).exists():
-            continue
 
         # first, get some info about structure of the input file
         first_img = reader.read_block(start=timestamps[0], end=timestamps[0])[
@@ -318,6 +325,10 @@ def _transpose_no_dask(
         new_dim_names = tuple(new_dim_names)
         variable_dims[varname] = new_dim_names
 
+        if Path(tmp_outfname).exists():
+            logging.info(f"{str(tmp_outfname)} already exists, skipping.")
+            continue
+
         # get shape of transposed array
         new_dim_sizes = [
             input_dim_sizes[input_dim_names.index(dim)]
@@ -331,14 +342,20 @@ def _transpose_no_dask(
         # chunks of about 100MB size
         if chunks is None:
             chunks = infer_chunks(new_dim_sizes, 100, dtype)
+        chunks = tuple(
+            [
+                cnks if cnks != -1 else sz
+                for cnks, sz in zip(chunks, new_dim_sizes)
+            ]
+        )
 
         # We will always read an image stack based on the available memory, so
         # we have to find the size of an image
         size = dtype.itemsize
         imagesize_GB = np.prod(new_dim_sizes[:-1]) * size / 1024 ** 3
         # we need to divide by two, because we need intermediate storage for
-        # the transposing
-        stepsize = int(math.floor(memory / imagesize_GB)) // 2
+        # the transposing, and somehow we still need another factor of 2
+        stepsize = int(math.floor(memory / imagesize_GB)) // 4
         len_new_dim = new_dim_sizes[-1]
         stepsize = min(stepsize, len_new_dim)
         logging.info(
@@ -349,7 +366,7 @@ def _transpose_no_dask(
         tmp_chunks = tuple(tmp_chunks)
 
         logging.debug(
-            f"create_transposed_netcdf: starting dask array creation"
+            f"create_transposed_netcdf: starting zarr array creation"
             f" for {len(timestamps)} timestamps"
         )
 
@@ -362,22 +379,25 @@ def _transpose_no_dask(
         )
 
         logging.debug(f"create_transposed_netcdf: Writing {tmp_outfname}")
-        print("Constructing array stack:")
-        for start_idx in tqdm(range(0, len(timestamps), stepsize)):
+        print(f"Constructing array stack for {varname}:")
+        pbar = tqdm(range(0, len(timestamps), stepsize))
+        for start_idx in pbar:
+            pbar.set_description("Reading")
             end_idx = min(start_idx + stepsize - 1, len(timestamps) - 1)
             block = reader.read_block(
                 timestamps[start_idx], timestamps[end_idx]
             )[varname]
             block = block.transpose(..., reader.timename)
-            zarr_array[..., start_idx:end_idx+1] = block.values
+            pbar.set_description("Writing")
+            zarr_array[..., start_idx : end_idx + 1] = block.values
 
     variable_arrays = {}
     encoding = {}
-    for var, fname in variable_fnames.items():
+    for varname, fname in variable_fnames.items():
+        logging.debug(f"Reading {str(fname)}")
         arr = da.from_zarr(fname)
-        dims = variable_dims[var]
+        dims = variable_dims[varname]
         metadata = reader.array_metadata[varname]
-        variable_arrays[var] = (dims, arr, metadata)
         if chunks is None:
             if zarr_output:
                 chunks = infer_chunks(new_dim_sizes, 100, dtype)
@@ -389,22 +409,34 @@ def _transpose_no_dask(
             "zlib": zlib,
             "complevel": complevel,
         }
+        chunk_dict = dict(zip(dims, chunks))
+        arr = xr.DataArray(data=arr, dims=dims, attrs=metadata)
+        arr = arr.chunk(chunk_dict)
+        arr.encoding = encoding[varname]
+        # we're writing again to a temporary file, because otherwise the
+        # dataset creation fails because dask sucks
+        # arr.to_dataset(name=varname).to_zarr(fname + ".tmp", consolidated=True)
+        # variable_arrays[varname] = xr.open_zarr(fname + ".tmp", consolidated=True)
+        variable_arrays[varname] = arr
 
+    logging.debug("Reading test image")
     test_img = reader.read_block(start=timestamps[0], end=timestamps[0])[
         reader.varnames[0]
     ]
     coords = {
-        c: test_img.coords[c]
-        for c in new_dim_names[:-1]
-        if c in test_img.coords
+        c: test_img.coords[c] for c in test_img.coords if c != reader.timename
     }
     coords[reader.timename] = timestamps
+    logging.debug("Creating dataset")
     ds = xr.Dataset(
         variable_arrays,
         coords=coords,
     )
     ds.attrs.update(reader.dataset_metadata)
 
+    logging.info(
+        f"create_transposed_netcdf: Writing combined file to {str(outfname)}"
+    )
     if not zarr_output:
         ds.to_netcdf(outfname, encoding=encoding)
     else:

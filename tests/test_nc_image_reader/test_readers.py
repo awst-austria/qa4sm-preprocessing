@@ -4,11 +4,15 @@ import pytest
 import time
 import xarray as xr
 
+from repurpose.img2ts import Img2Ts
+
 from qa4sm_preprocessing.nc_image_reader.readers import (
     DirectoryImageReader,
     XarrayImageReader,
     XarrayTSReader,
+    GriddedNcOrthoMultiTs,
 )
+from qa4sm_preprocessing.nc_image_reader.utils import mkdate
 
 # this is defined in conftest.py
 from pytest import test_data_path
@@ -159,8 +163,8 @@ def test_xarray_reader_basic(default_xarray_reader):
     validate_reader(default_xarray_reader)
 
 
-def test_nonstandard_names(test_dataset):
-    ds = test_dataset.rename({"time": "tim", "lat": "la", "lon": "lo"})
+def test_nonstandard_names(latlon_test_dataset):
+    ds = latlon_test_dataset.rename({"time": "tim", "lat": "la", "lon": "lo"})
     reader = XarrayImageReader(
         ds, "X", timename="tim", latname="la", lonname="lo"
     )
@@ -168,12 +172,43 @@ def test_nonstandard_names(test_dataset):
     assert block.shape == (100, 10, 20)
 
 
-def test_locdim(test_loc_dataset):
+def test_unstructured(unstructured_test_dataset):
     reader = XarrayImageReader(
-        test_loc_dataset, "X", locdim="location", latname="lat", lonname="lon"
+        unstructured_test_dataset,
+        "X",
+        locdim="location",
+        latname="lat",
+        lonname="lon",
     )
     block = reader.read_block()["X"]
     assert block.shape == (100, 200)
+    assert list(block.coords) == ["time", "lat", "lon"]
+
+    img = reader.read(reader.timestamps[0])
+    assert img.data["X"].shape == (200,)
+    assert np.all(img.data["X"] == block.isel(time=0).values)
+
+
+def test_curvilinear(curvilinear_test_dataset):
+    reader = XarrayImageReader(
+        curvilinear_test_dataset,
+        "X",
+        latdim="y",
+        londim="x",
+        latname="lat",
+        lonname="lon",
+        curvilinear=True,
+    )
+    block = reader.read_block()["X"]
+    assert block.shape == (100, 10, 20)
+    assert list(block.coords) == ["time", "lat", "lon"]
+    assert list(block.dims) == ["time", "y", "x"]
+    assert block.lat.shape == (10, 20)
+    assert block.lon.shape == (10, 20)
+
+    img = reader.read(reader.timestamps[0])
+    assert img.data["X"].shape == (200,)
+    assert np.all(img.data["X"] == block.isel(time=0).values.ravel())
 
 
 def test_bbox_landmask_cellsize(cmip_ds):
@@ -249,19 +284,61 @@ def test_bbox_landmask_cellsize(cmip_ds):
 ###############################################################################
 
 
-def test_xarray_ts_reader(test_dataset):
-    reader = XarrayTSReader(test_dataset, "X")
+def test_xarray_ts_reader(latlon_test_dataset):
+    reader = XarrayTSReader(latlon_test_dataset, "X")
     _, lons, lats = reader.grid.get_grid_points()
     for lon, lat in zip(lons, lats):
         ts = reader.read(lon, lat)["X"]
-        ref = test_dataset.X.sel(lat=lat, lon=lon)
+        ref = latlon_test_dataset.X.sel(lat=lat, lon=lon)
         assert np.all(ts == ref)
 
 
-def test_xarray_ts_reader_locdim(test_loc_dataset):
-    reader = XarrayTSReader(test_loc_dataset, "X", locdim="location")
+def test_xarray_ts_reader_locdim(unstructured_test_dataset):
+    reader = XarrayTSReader(unstructured_test_dataset, "X", locdim="location")
     gpis, _, _ = reader.grid.get_grid_points()
     for gpi in gpis:
         ts = reader.read(gpi)["X"]
-        ref = test_loc_dataset.X.isel(location=gpi)
+        ref = unstructured_test_dataset.X.isel(location=gpi)
         assert np.all(ts == ref)
+
+
+###############################################################################
+# Full chain with time offset
+###############################################################################
+
+
+def test_SMOS(test_output_path):
+    reader = DirectoryImageReader(
+        test_data_path / "SMOS_L3",
+        varnames=["Soil_Moisture", "Mean_Acq_Time_Seconds"],
+        time_regex_pattern="SM_OPER_MIR_CLF31A_([0-9T]+)_.*.DBL.nc",
+        fmt="%Y%m%dT%H%M%S",
+    )
+
+    outpath = test_output_path / "SMOS_ts"
+    outpath.mkdir(exist_ok=True, parents=True)
+
+    reshuffler = Img2Ts(
+        input_dataset=reader,
+        outputpath=str(outpath),
+        startdate=reader.timestamps[0],
+        enddate=reader.timestamps[-1],
+        ts_attributes=reader.dataset_metadata,
+        zlib=True,
+        imgbuffer=3,
+        cellsize_lat=5,
+        cellsize_lon=5,
+    )
+    reshuffler.calc()
+
+    ts_reader = GriddedNcOrthoMultiTs(outpath, time_offset_name="Mean_Acq_Time_Seconds")
+    df = ts_reader.read(ts_reader.grid.activegpis[100])
+    expected_timestamps = list(map(mkdate, [
+        "2015-05-06T03:50:13",
+        "2015-05-07T03:11:27",
+        "2015-05-08T02:33:02",
+    ]))
+    expected_values = np.array([0.162236, 0.013245, np.nan])
+    assert np.all(expected_timestamps == df.index)
+    np.testing.assert_almost_equal(expected_values, df.Soil_Moisture.values, 6)
+    assert np.all(df.columns == ["Soil_Moisture"])

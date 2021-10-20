@@ -52,6 +52,7 @@ class XarrayReaderBase:
         landmask: Union[xr.DataArray, str] = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        curvilinear: bool = False,
     ):
         if isinstance(varnames, str):
             varnames = [varnames]
@@ -76,6 +77,17 @@ class XarrayReaderBase:
         self.latdim = latdim
         self.londim = londim
         self.locdim = locdim
+        self.curvilinear = curvilinear
+        if self.curvilinear and (
+            latdim is None
+            or londim is None
+            or latname is None
+            or lonname is None
+            or locdim is not None
+        ):
+            raise ReaderError(
+                "For curvilinear grids, lat/lon-dim and lat/lon-name must be given."
+            )
         if locdim is not None and (
             latname is None or lonname is None
         ):  # pragma: no cover
@@ -115,7 +127,10 @@ class XarrayReaderBase:
         self.lat = self._get_coord(ds, "lat")
         self.lon = self._get_coord(ds, "lon")
         if self._has_regular_grid:
-            grid = gridfromdims(self.lon, self.lat)
+            if self.curvilinear:
+                grid = BasicGrid(self.lon.values.ravel(), self.lat.values.ravel())
+            else:
+                grid = gridfromdims(self.lon, self.lat)
         else:
             grid = BasicGrid(self.lon, self.lat)
 
@@ -163,6 +178,10 @@ class XarrayReaderBase:
             # coordinate is a dimension in dataset, so we can just return it
             return ds[cname]
         dimlen = len(ds[dimname])
+        if self.curvilinear:
+            # for curvilinear grids, we assume that latitude and longitude are
+            # given via their coordinate name, and they will be 2D arrays
+            return ds[cname]
         if _coord is not None:
             start, step = _coord
             coord = np.array([start + i * step for i in range(dimlen)])
@@ -249,11 +268,17 @@ class XarrayImageReaderMixin:
 
         if timestamp in self.timestamps:
             img = self._select_vars_levels(self._read_image(timestamp))
-            # check if dimensions are as expected and potentially select from
-            # non lat/lon/time dimensions
-            latdim = self.latdim if self.latdim is not None else self.latname
-            londim = self.londim if self.londim is not None else self.lonname
-            expected_dims = [latdim, londim, self.timename]
+            # check if dimensions are as expected
+            if self.locdim is None:
+                latdim = (
+                    self.latdim if self.latdim is not None else self.latname
+                )
+                londim = (
+                    self.londim if self.londim is not None else self.lonname
+                )
+                expected_dims = [latdim, londim, self.timename]
+            else:
+                expected_dims = [self.locdim, self.timename]
             for d in img.dims:
                 if d not in expected_dims:  # pragma: no cover
                     raise ReaderError(
@@ -348,13 +373,43 @@ class XarrayImageReaderMixin:
         if self.landmask is not None:
             block = block.where(self.landmask)
 
-        if self.latdim is not None:
-            block = block.rename({self.latdim: self.latname}).assign_coords(
-                {self.latname: self.lat.values}
-            )
-        if self.londim is not None:
-            block = block.rename({self.londim: self.lonname}).assign_coords(
-                {self.lonname: self.lon.values}
+        # This works differently depending on how the original data is
+        # structured:
+        # 1) regular lon-lat grid where latdim=latname, e.g. latname="lat", and
+        #    "lat" is a 1D array
+        #    - How to catch: latdim/londim is None
+        #    - What to do: nothing
+        # 2) regular lon-lat grid where latdim is not the same as the latitude
+        #    vector, e.g. latdim="north_south", latname="lat", where "lat" is a
+        #    1D array
+        #    - How to catch: latdim/londim and latname/londim are set, locdim
+        #      is None, self.curvilinear is False
+        #    - What to do: replace latdim with latname (i.e. rename and reset
+        #      values)
+        # 3) curvilinear grid: for example latdim="y", latname="lat", where
+        #    "lat" is a 2D array
+        #    - How to catch: latdim/londim and latname/londim are set, locdim
+        #      is None, self.curvilinear is True
+        #    - What to do: nothing, coordinates are already here and have the
+        #      right name and dimensions
+        # 4) unstructured grid: for example, locdim="loc", latname="lat",
+        #    lonname="lon"
+        #    - How to catch: self.locdim is not None
+        #    - What to do: assign flat lat and lon arrays as coordinates
+        if not self.curvilinear:
+            if self.latdim is not None:
+                block = block.rename({self.latdim: self.latname}).assign_coords(
+                    {self.latname: self.lat.values}
+                )
+            if self.londim is not None:
+                block = block.rename({self.londim: self.lonname}).assign_coords(
+                    {self.lonname: self.lon.values}
+                )
+        if self.locdim is not None:
+            # add latitude and longitude as coordinates
+            # if locdim is not None, latname and lonname have to be set
+            block = block.assign_coords(
+                {self.latname: self.lat, self.lonname: self.lon}
             )
 
         # bounding box is applied after assigning the coordinates
@@ -446,10 +501,17 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         If the latitude can not be inferred from the dataset you can specify it
         by giving a start and stepsize. This is only used if `latdim` is
         given.
-    lon : tupl, optional
+    lon : tuple, optional
         If the longitude can not be inferred from the dataset you can specify
         it by giving a start and stepsize. This is only used if `londim` is
         given.
+    curvilinear : bool, optional
+        Whether the grid is curvilinear, i.e. is a 2D grid, but not a regular
+        lat-lon grid. In this case, `latname` and `lonname` must be given, and
+        must be names of the variables containing the 2D latitude and longitude
+        values. Additionally, `latdim` and `londim` must be given and will be
+        interpreted as vertical and horizontal dimension.
+        Default is False.
     timename : str, optional
         The name of the time coordinate, default is "time".
     landmask : xr.DataArray or str, optional
@@ -469,7 +531,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Dictionary to use to rename variables in the file. This is applied
         before anything else, so all other parameters referring to variable
         names should use the new names.
-    use_dask: bool, optional
+    use_dask : bool, optional
         Whether to open image files using dask. This might be useful in case
         you run into memory issues.
     """
@@ -495,13 +557,17 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         cellsize: float = None,
         rename: dict = None,
         use_dask: bool = False,
+        cache: bool = False,
+        curvilinear: bool = False,
     ):
 
         # first, we walk over the whole directory subtree and find any files
         # that match our pattern
         directory = Path(directory)
         filepaths = {}
-        for fpath in glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True):
+        for fpath in glob.glob(
+            str(Path(directory) / f"**/{pattern}"), recursive=True
+        ):
             fname = Path(fpath).name
             filepaths[fname] = fpath
 
@@ -522,6 +588,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             self.chunks = -1
         else:
             self.chunks = None
+        self.cache = cache
 
         # now we can call the parent constructor using the dataset from the
         # first file
@@ -540,6 +607,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
+            curvilinear=curvilinear,
         )
 
         # if possible, deduce the timestamps from the filenames and create a
@@ -582,7 +650,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         self.timestamps = sorted(list(self.filepaths))
 
     def _read_image(self, timestamp):
-        ds = xr.open_dataset(self.filepaths[timestamp], chunks=self.chunks)
+        ds = xr.open_dataset(
+            self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
+        )
         if self.rename is not None:
             ds = ds.rename(self.rename)
         return ds
@@ -643,6 +713,13 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         If the longitude can not be inferred from the dataset you can specify
         it by giving a start and stepsize. This is only used if `londim` is
         given.
+    curvilinear : bool, optional
+        Whether the grid is curvilinear, i.e. is a 2D grid, but not a regular
+        lat-lon grid. In this case, `latname` and `lonname` must be given, and
+        must be names of the variables containing the 2D latitude and longitude
+        values. Additionally, `latdim` and `londim` must be given and will be
+        interpreted as vertical and horizontal dimension.
+        Default is False.
     landmask : xr.DataArray or str, optional
         A land mask to be applied to reduce storage size. This can either be a
         xr.DataArray of the same shape as the dataset images with ``False`` at
@@ -678,6 +755,7 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         bbox: Iterable = None,
         cellsize: float = None,
         use_dask: bool = False,
+        curvilinear: bool = False,
     ):
 
         if isinstance(ds, (str, Path)):
@@ -701,6 +779,7 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
+            curvilinear=curvilinear,
         )
         self.data = ds
         self.timestamps = ds.indexes[self.timename].to_pydatetime()

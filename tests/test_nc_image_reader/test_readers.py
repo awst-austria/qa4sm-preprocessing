@@ -159,8 +159,8 @@ def test_xarray_reader_basic(default_xarray_reader):
     validate_reader(default_xarray_reader)
 
 
-def test_nonstandard_names(test_dataset):
-    ds = test_dataset.rename({"time": "tim", "lat": "la", "lon": "lo"})
+def test_nonstandard_names(latlon_test_dataset):
+    ds = latlon_test_dataset.rename({"time": "tim", "lat": "la", "lon": "lo"})
     reader = XarrayImageReader(
         ds, "X", timename="tim", latname="la", lonname="lo"
     )
@@ -168,12 +168,43 @@ def test_nonstandard_names(test_dataset):
     assert block.shape == (100, 10, 20)
 
 
-def test_locdim(test_loc_dataset):
+def test_unstructured(unstructured_test_dataset):
     reader = XarrayImageReader(
-        test_loc_dataset, "X", locdim="location", latname="lat", lonname="lon"
+        unstructured_test_dataset,
+        "X",
+        locdim="location",
+        latname="lat",
+        lonname="lon",
     )
     block = reader.read_block()["X"]
     assert block.shape == (100, 200)
+    assert list(block.coords) == ["time", "lat", "lon"]
+
+    img = reader.read(reader.timestamps[0])
+    assert img.data["X"].shape == (200,)
+    assert np.all(img.data["X"] == block.isel(time=0).values)
+
+
+def test_curvilinear(curvilinear_test_dataset):
+    reader = XarrayImageReader(
+        curvilinear_test_dataset,
+        "X",
+        latdim="y",
+        londim="x",
+        latname="lat",
+        lonname="lon",
+        curvilinear=True,
+    )
+    block = reader.read_block()["X"]
+    assert block.shape == (100, 10, 20)
+    assert list(block.coords) == ["time", "lat", "lon"]
+    assert list(block.dims) == ["time", "y", "x"]
+    assert block.lat.shape == (10, 20)
+    assert block.lon.shape == (10, 20)
+
+    img = reader.read(reader.timestamps[0])
+    assert img.data["X"].shape == (200,)
+    assert np.all(img.data["X"] == block.isel(time=0).values.ravel())
 
 
 def test_bbox_landmask_cellsize(cmip_ds):
@@ -249,19 +280,19 @@ def test_bbox_landmask_cellsize(cmip_ds):
 ###############################################################################
 
 
-def test_xarray_ts_reader(test_dataset):
-    reader = XarrayTSReader(test_dataset, "X")
+def test_xarray_ts_reader(latlon_test_dataset):
+    reader = XarrayTSReader(latlon_test_dataset, "X")
     _, lons, lats = reader.grid.get_grid_points()
     for lon, lat in zip(lons, lats):
         ts = reader.read(lon, lat)["X"]
-        ref = test_dataset.X.sel(lat=lat, lon=lon)
+        ref = latlon_test_dataset.X.sel(lat=lat, lon=lon)
         assert np.all(ts == ref)
 
 
-def test_xarray_ts_reader_locdim(test_loc_dataset):
-    reader = XarrayTSReader(test_loc_dataset, "X", locdim="location")
+def test_xarray_ts_reader_locdim(unstructured_test_dataset):
+    reader = XarrayTSReader(unstructured_test_dataset, "X", locdim="location")
     gpis, _, _ = reader.grid.get_grid_points()
     for gpi in gpis:
         ts = reader.read(gpi)["X"]
-        ref = test_loc_dataset.X.isel(location=gpi)
+        ref = unstructured_test_dataset.X.isel(location=gpi)
         assert np.all(ts == ref)

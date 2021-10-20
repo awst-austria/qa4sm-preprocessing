@@ -5,7 +5,10 @@ import pytest
 import shutil
 import xarray as xr
 
-from qa4sm_preprocessing.nc_image_reader.readers import DirectoryImageReader, XarrayImageReader
+from qa4sm_preprocessing.nc_image_reader.readers import (
+    DirectoryImageReader,
+    XarrayImageReader,
+)
 
 
 here = Path(__file__).resolve().parent
@@ -25,7 +28,7 @@ def test_output_path(tmpdir_factory):
 
 
 @pytest.fixture
-def test_dataset():
+def latlon_test_dataset():
     rng = np.random.default_rng(42)
     nlat, nlon, ntime = 10, 20, 100
     lat = np.linspace(0, 1, nlat)
@@ -42,8 +45,30 @@ def test_dataset():
 
 
 @pytest.fixture
-def test_loc_dataset(test_dataset):
-    ds = test_dataset.stack({"location": ("lat", "lon")})
+def curvilinear_test_dataset():
+    rng = np.random.default_rng(42)
+    nlat, nlon, ntime = 10, 20, 100
+    lat = np.linspace(0, 1, nlat)
+    lon = np.linspace(0, 1, nlon)
+    LON, LAT = np.meshgrid(lon, lat)
+    time = pd.date_range("2000", periods=ntime, freq="D")
+
+    X = rng.normal(size=(ntime, nlat, nlon))
+
+    ds = xr.Dataset(
+        {"X": (["time", "y", "x"], X)},
+        coords={
+            "time": time,
+            "lat": (["y", "x"], LAT),
+            "lon": (["y", "x"], LON),
+        },
+    )
+    return ds
+
+
+@pytest.fixture
+def unstructured_test_dataset(latlon_test_dataset):
+    ds = latlon_test_dataset.stack({"location": ("lat", "lon")})
     ds["latitude"] = ds.lat
     ds["longitude"] = ds.lon
     ds = ds.drop_vars("location").rename(

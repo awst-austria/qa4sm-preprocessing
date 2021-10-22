@@ -28,8 +28,11 @@ from .utils import mkdate, infer_chunks
 
 class XarrayReaderBase:
     """
-    Base class for readers that either read a full netcdf stack or single files
-    with xarray.
+    Base class for readers backed by xarray objects (images, image stacks,
+    timeseries).
+    
+    This base class provides methods to infer grid information and metadata
+    from the stack and set them up for use in reading methods.
 
     Note that the constructor needs a dataset from which to derive the grid,
     the metadata, and the land mask, so you might have to get this first in the
@@ -158,12 +161,12 @@ class XarrayReaderBase:
             )
             grid = grid.subgrid_from_gpis(bbox_gpis)
         num_gpis = len(grid.activegpis)
-        logging.info(f"_grid_from_xarray: Number of active gpis: {num_gpis}")
+        logging.debug(f"_grid_from_xarray: Number of active gpis: {num_gpis}")
 
         if hasattr(self, "cellsize") and self.cellsize is not None:
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
-            logging.info(
+            logging.debug(
                 f"_grid_from_xarray: Number of grid cells: {num_cells}"
             )
 
@@ -223,83 +226,34 @@ class XarrayReaderBase:
 
 class XarrayImageReaderMixin:
     """
+    Base class for image readers backed by xarray objects (multiple single
+    images or single stack of multiple images).
+
     Provides the methods
-    - self.read
     - self.tstamps_for_daterange
-    - self._grid_from_xarray
+    - self.read
     - self.read_block
 
     and therefore meets all prerequisites for Img2Ts.
 
-    Child classes must override `_read_image` and need to set self.timestamps.
+    Child classes must override `_read_block` and need to set the attribute
+    self.timestamps to an iterable of available timestamps.
     """
 
-    @abstractmethod
-    def _read_image(
-        self, timestamp: datetime.datetime
-    ) -> xr.Dataset:  # pragma: no cover
-        """
-        Returns a single image for the given timestamp
-        """
-        ...
-
-    def read(
-        self, timestamp: Union[datetime.datetime, str], **kwargs
-    ) -> Image:
-        """
-        Read a single image at a given timestamp. Raises `KeyError` if
-        timestamp is not available in the dataset.
-
-        Parameters
-        ----------
-        timestamp : datetime.datetime or str
-            Timestamp of image of interest
-
-        Returns
-        -------
-        img_dict : dict
-            Dictionary containing the image data as numpy array, using the
-            parameter name as key.
-
-        Raises
-        ------
-        KeyError
-        """
-        if isinstance(timestamp, str):
-            timestamp = mkdate(timestamp)
-
-        if timestamp in self.timestamps:
-            img = self._select_vars_levels(self._read_image(timestamp))
-            # check if dimensions are as expected
-            if self.locdim is None:
-                latdim = (
-                    self.latdim if self.latdim is not None else self.latname
-                )
-                londim = (
-                    self.londim if self.londim is not None else self.lonname
-                )
-                expected_dims = [latdim, londim, self.timename]
-            else:
-                expected_dims = [self.locdim, self.timename]
-            for d in img.dims:
-                if d not in expected_dims:  # pragma: no cover
-                    raise ReaderError(
-                        f"Unexpected dimension {d} in image for {timestamp}."
-                    )
-            if self._has_regular_grid:
-                img = img.stack(dimensions={"loc": (latdim, londim)})
-            data = {
-                varname: img[varname].values[self.grid.activegpis]
-                for varname in self.varnames
-            }
-            metadata = self.array_metadata
-            return Image(
-                self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp
-            )
-        else:  # pragma: no cover
-            raise ReaderError(
-                f"Timestamp {timestamp} is not available in the dataset!"
-            )
+    def _validate_start_end(
+        self,
+        start: Union[datetime.datetime, str],
+        end: Union[datetime.datetime, str],
+    ) -> Tuple[datetime.datetime]:
+        if start is None:
+            start = self.timestamps[0]
+        elif isinstance(start, str):
+            start = mkdate(start)
+        if end is None:
+            end = self.timestamps[-1]
+        elif isinstance(end, str):
+            end = mkdate(end)
+        return start, end
 
     def tstamps_for_daterange(
         self,
@@ -322,32 +276,23 @@ class XarrayImageReaderMixin:
             Array of datetime timestamps of available images in the date
             range.
         """
-        if start is None:
-            start = self.timestamps[0]
-        elif isinstance(start, str):
-            start = mkdate(start)
-        if end is None:
-            end = self.timestamps[-1]
-        elif isinstance(end, str):
-            end = mkdate(end)
+        start, end = self._validate_start_end(start, end)
         return list(filter(lambda t: t >= start and t <= end, self.timestamps))
 
-    def _read_block(self, timestamps: Iterable) -> xr.Dataset:
-        imgs = []
-        for tstamp in timestamps:
-            img = self._select_vars_levels(self._read_image(tstamp))
-            imgs.append(img)
-        block = xr.concat(imgs, dim=self.timename).assign_coords(
-            {self.timename: timestamps}
-        )
-        for varname in self.array_metadata:
-            block[varname].attrs.update(self.array_metadata[varname])
-        return block
+    @abstractmethod
+    def _read_block(
+        self, start: datetime.datetime, end: datetime.datetime
+    ) -> xr.Dataset:  # pragma: no cover
+        """
+        Returns a single image for the given timestamp
+        """
+        ...
 
     def read_block(
         self,
         start: Union[datetime.datetime, str] = None,
         end: Union[datetime.datetime, str] = None,
+        _apply_landmask_bbox=True,
     ) -> xr.Dataset:
         """
         Reads a block of the image stack.
@@ -358,6 +303,10 @@ class XarrayImageReaderMixin:
             If not given, start at first timestamp in dataset.
         end : datetime.datetime or str, optional
             If not given, end at last timestamp in dataset.
+        _apply_landmask_bbox : bool, optional
+            For internal use only. Whether to apply the landmask and bounding
+            box. Should be always set to True, except when calling from within
+            `read`, because selection is then made based on the full grid.
 
         Returns
         -------
@@ -365,18 +314,15 @@ class XarrayImageReaderMixin:
             A block of the dataset. In case of a regular grid, this will have
             ``self.latname`` and ``self.lonname`` as dimensions.
         """
-        if start == end and start is not None:
-            timestamps = [start]
-        else:
-            timestamps = self.tstamps_for_daterange(start, end)
-        block = self._read_block(timestamps)
+        start, end = self._validate_start_end(start, end)
+        block = self._read_block(start, end)
         # we might need to apply the landmask, this is applied before renaming
         # the coordinates, because it is in the original coordinates
-        if self.landmask is not None:
+        if self.landmask is not None and _apply_landmask_bbox:
             block = block.where(self.landmask)
 
-        # This works differently depending on how the original data is
-        # structured:
+        # Now we have to set the coordinates/dimensions correctly.  This works
+        # differently depending on how the original data is structured:
         # 1) regular lon-lat grid where latdim=latname, e.g. latname="lat", and
         #    "lat" is a 1D array
         #    - How to catch: latdim/londim is None
@@ -415,7 +361,7 @@ class XarrayImageReaderMixin:
             )
 
         # bounding box is applied after assigning the coordinates
-        if self.bbox is not None:
+        if self.bbox is not None and _apply_landmask_bbox:
             lonmin, latmin, lonmax, latmax = (*self.bbox,)
             block = block.where(
                 (
@@ -429,6 +375,54 @@ class XarrayImageReaderMixin:
                 drop=True,
             )
         return block
+
+    def read(
+        self, timestamp: Union[datetime.datetime, str], **kwargs
+    ) -> Image:
+        """
+        Read a single image at a given timestamp. Raises `KeyError` if
+        timestamp is not available in the dataset.
+
+        Parameters
+        ----------
+        timestamp : datetime.datetime or str
+            Timestamp of image of interest
+
+        Returns
+        -------
+        img_dict : dict
+            Dictionary containing the image data as numpy array, using the
+            parameter name as key.
+
+        Raises
+        ------
+        KeyError
+        """
+        if isinstance(timestamp, str):
+            timestamp = mkdate(timestamp)
+
+        if timestamp in self.timestamps:
+            img = self.read_block(
+                timestamp,
+                timestamp,
+                _apply_landmask_bbox=False
+            ).isel({self.timename: 0})
+            if self._has_regular_grid:
+                latname = self.latname if not self.curvilinear else self.latdim
+                lonname = self.lonname if not self.curvilinear else self.londim
+                img = img.stack(dimensions={"loc": (latname, lonname)})
+            data = {
+                varname: img[varname].values[self.grid.activegpis]
+                for varname in self.varnames
+            }
+            metadata = self.array_metadata
+            return Image(
+                self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp
+            )
+        else:  # pragma: no cover
+            raise ReaderError(
+                f"Timestamp {timestamp} is not available in the dataset!"
+            )
 
 
 class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
@@ -651,16 +645,37 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # return them sorted
         self.timestamps = sorted(list(self.filepaths))
 
-    def _read_image(self, timestamp):
+    def _read_file(self, timestamp):
+        # reads a single file, does renaming, and selecting of levels
         ds = xr.open_dataset(
             self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
         )
         if self.rename is not None:
             ds = ds.rename(self.rename)
-        return ds
+        return self._select_vars_levels(ds)
+
+    def _read_block(self, start: datetime.datetime, end: datetime.datetime) -> xr.Dataset:
+        # Here we just read image file by image file within the given range and
+        # concatenate them to a single dataset along the time dimension.
+        if start == end:
+            timestamps = [start]
+        else:
+            timestamps = self.tstamps_for_daterange(start, end)
+
+        imgs = []
+        for tstamp in timestamps:
+            imgs.append(self._read_file(tstamp))
+
+        block = xr.concat(imgs, dim=self.timename).assign_coords(
+            {self.timename: timestamps}
+        )
+
+        for varname in self.array_metadata:
+            block[varname].attrs.update(self.array_metadata[varname])
+        return block
 
 
-class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
+class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
     """
     Image reader that wraps a xarray.Dataset.
 
@@ -783,16 +798,11 @@ class XarrayImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             cellsize=cellsize,
             curvilinear=curvilinear,
         )
-        self.data = ds
+        self.data = self._select_vars_levels(ds)
         self.timestamps = ds.indexes[self.timename].to_pydatetime()
 
-    def _read_image(self, timestamp):
-        return self.data.sel({self.timename: timestamp})
-
-    def _read_block(self, timestamps: Iterable) -> xr.DataArray:
-        return self._select_vars_levels(
-            self.data.sel({self.timename: timestamps})
-        )
+    def _read_block(self, start: datetime.datetime, end: datetime.datetime) -> xr.DataArray:
+        return self.data.sel({self.timename: slice(start, end)})
 
 
 class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):

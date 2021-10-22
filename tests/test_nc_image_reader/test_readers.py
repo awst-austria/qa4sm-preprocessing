@@ -8,7 +8,7 @@ from repurpose.img2ts import Img2Ts
 
 from qa4sm_preprocessing.nc_image_reader.readers import (
     DirectoryImageReader,
-    XarrayImageReader,
+    XarrayImageStackReader,
     XarrayTSReader,
     GriddedNcOrthoMultiTs,
 )
@@ -54,16 +54,16 @@ def validate_reader(reader):
 # Optional features to test for DirectoryImageReader:
 # - [X] level
 #   - [X] with level: default_directory_reader
-#   - [-] without level: covered in XarrayImageReader tests
+#   - [-] without level: covered in XarrayImageStackReader tests
 # - [X] fmt: default_directory_reader
 # - [X] pattern: default_directory_reader
 # - [X] time_regex_pattern: test_time_regex
-# - [-] timename, latname, lonname: covered in XarrayImageReader tests
+# - [-] timename, latname, lonname: covered in XarrayImageStackReader tests
 # - [X] latdim, londim: default_directory_reader
-# - [-] locdim: covered in XarrayImageReader tests
-# - [-] landmask: covered in XarrayImageReader tests
-# - [-] bbox: covered in XarrayImageReader tests
-# - [-] cellsize None: covered in XarrayImageReader tests
+# - [-] locdim: covered in XarrayImageStackReader tests
+# - [-] landmask: covered in XarrayImageStackReader tests
+# - [-] bbox: covered in XarrayImageStackReader tests
+# - [-] cellsize None: covered in XarrayImageStackReader tests
 
 
 def test_directory_reader_setup():
@@ -133,7 +133,7 @@ def test_read_block(default_directory_reader):
     block = default_directory_reader.read_block()["SoilMoist_inst"]
     assert block.shape == (6, 100, 50)
 
-    reader = XarrayImageReader(
+    reader = XarrayImageStackReader(
         block.to_dataset(name="SoilMoist_inst"), "SoilMoist_inst"
     )
     validate_reader(reader)
@@ -146,7 +146,7 @@ def test_read_block(default_directory_reader):
 
 
 ###############################################################################
-# XarrayImageReader
+# XarrayImageStackReader
 ###############################################################################
 
 # Optional features to test for DirectoryImageReader:
@@ -165,7 +165,7 @@ def test_xarray_reader_basic(default_xarray_reader):
 
 def test_nonstandard_names(latlon_test_dataset):
     ds = latlon_test_dataset.rename({"time": "tim", "lat": "la", "lon": "lo"})
-    reader = XarrayImageReader(
+    reader = XarrayImageStackReader(
         ds, "X", timename="tim", latname="la", lonname="lo"
     )
     block = reader.read_block()["X"]
@@ -173,7 +173,7 @@ def test_nonstandard_names(latlon_test_dataset):
 
 
 def test_unstructured(unstructured_test_dataset):
-    reader = XarrayImageReader(
+    reader = XarrayImageStackReader(
         unstructured_test_dataset,
         "X",
         locdim="location",
@@ -190,7 +190,7 @@ def test_unstructured(unstructured_test_dataset):
 
 
 def test_curvilinear(curvilinear_test_dataset):
-    reader = XarrayImageReader(
+    reader = XarrayImageStackReader(
         curvilinear_test_dataset,
         "X",
         latdim="y",
@@ -218,7 +218,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
     num_gpis = cmip_ds["mrsos"].isel(time=0).size
 
     # normal reader without bbox or landmask
-    reader = XarrayImageReader(cmip_ds, "mrsos", cellsize=5.0)
+    reader = XarrayImageStackReader(cmip_ds, "mrsos", cellsize=5.0)
     assert len(reader.grid.activegpis) == num_gpis
     assert len(np.unique(reader.grid.activearrcell)) == 100
     block = reader.read_block()["mrsos"]
@@ -230,7 +230,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
     max_lon = 100
     max_lat = 30
     bbox = [min_lon, min_lat, max_lon, max_lat]
-    reader = XarrayImageReader(cmip_ds, "mrsos", bbox=bbox, cellsize=5.0)
+    reader = XarrayImageStackReader(cmip_ds, "mrsos", bbox=bbox, cellsize=5.0)
     num_gpis_box = len(reader.grid.activegpis)
     assert num_gpis_box < num_gpis
     assert len(np.unique(reader.grid.activearrcell)) == 4
@@ -247,7 +247,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
 
     # now additionally using a landmask
     landmask = ~np.isnan(cmip_ds.mrsos.isel(time=0))
-    reader = XarrayImageReader(
+    reader = XarrayImageStackReader(
         cmip_ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
     )
     assert len(reader.grid.activegpis) < num_gpis
@@ -266,7 +266,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
     # with landmask as variable name
     ds = cmip_ds
     ds["landmask"] = landmask
-    reader = XarrayImageReader(
+    reader = XarrayImageStackReader(
         ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
     )
     assert len(reader.grid.activegpis) < num_gpis

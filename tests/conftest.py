@@ -7,7 +7,7 @@ import xarray as xr
 
 from qa4sm_preprocessing.nc_image_reader.readers import (
     DirectoryImageReader,
-    XarrayImageReader,
+    XarrayImageStackReader,
 )
 
 
@@ -106,7 +106,7 @@ def lis_noahmp_stacked(default_directory_reader):
 
 @pytest.fixture
 def default_xarray_reader(lis_noahmp_stacked):
-    return XarrayImageReader(lis_noahmp_stacked, "SoilMoist_inst")
+    return XarrayImageStackReader(lis_noahmp_stacked, "SoilMoist_inst")
 
 
 @pytest.fixture

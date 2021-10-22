@@ -31,7 +31,7 @@ import sys
 
 from repurpose.img2ts import Img2Ts
 
-from .readers import XarrayImageReader, DirectoryImageReader
+from .readers import XarrayImageStackReader, DirectoryImageReader
 from .transpose import create_transposed_netcdf
 from .utils import mkdate, str2bool
 
@@ -281,7 +281,7 @@ def parse_args(parser, args):
 
     input_path = Path(args.dataset_root)
     if input_path.is_file():
-        reader = XarrayImageReader(
+        reader = XarrayImageStackReader(
             input_path, args.parameter, **common_reader_kwargs,
         )
     else:

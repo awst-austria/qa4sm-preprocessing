@@ -154,8 +154,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         )
         self.add_argument(
             "--daily_average",
-            type=bool,
-            nargs=1,
+            type=str2bool,
             default=False,
             help=(
                 "Switch to average sub-daily images to the relative daily level."

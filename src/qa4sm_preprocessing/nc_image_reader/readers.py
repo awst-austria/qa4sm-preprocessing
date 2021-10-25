@@ -273,8 +273,9 @@ class XarrayImageReaderMixin:
         Returns
         -------
         timestamps : array_like
-            Array of datetime timestamps of available images in the date
-            range.
+            Array of timestamps of available images in the date
+            range. If self.daily average, the timestamps will be specified
+            as datetime.date, otherwise as datetime.datetime
         """
         if start == end:
             tstamps = [start]
@@ -282,10 +283,9 @@ class XarrayImageReaderMixin:
             start, end = self._validate_start_end(start, end)
             tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
 
-        if self.average_timestamps:
-            tstamps = np.unique(
-                np.array([tstamp.date() for tstamp in tstamps])
-            )
+        if hasattr(self, "daily_image") and self.daily_average:
+            # remove time information and redundant values
+            tstamps = set([tstamp.date() for tstamp in tstamps])
 
         return tstamps
 
@@ -603,7 +603,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             self.chunks = None
         self.cache = cache
 
-        self.average_timestamps = daily_average
+        self.daily_average = daily_average
 
         # now we can call the parent constructor using the dataset from the
         # first file
@@ -661,7 +661,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                 tstamp = time[0].to_pydatetime()
                 self.filepaths[tstamp] = path
 
-        if self.average_timestamps:
+        if self.daily_average:
             self.nested_timestamps = self._organize_subdaily()
 
         # sort the timestamps according to date, because we might have to
@@ -683,12 +683,14 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     def _read_file(self, timestamp):
         # reads file(s), does renaming, and selecting of levels
         # average sub-daily images if selected
-        if self.average_timestamps:
+        if self.daily_average:
             sub_dss = []
+            # check that the timestamp has the correct (daily) level value
             if timestamp not in self.nested_timestamps.keys():
                 ds = xr.open_dataset(
                     self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
                 )
+            # if it is a sub-daily level timestamp, we read the file directly
             else:
                 for sub_timestamp in self.nested_timestamps[timestamp]:
                     sub_ds = xr.open_dataset(

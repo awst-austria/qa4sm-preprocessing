@@ -287,6 +287,7 @@ def parse_args(parser, args):
         bbox=args.bbox,
         landmask=args.landmask,
         level=level,
+        daily_average=args.daily_average,
     )
 
     input_path = Path(args.dataset_root)

@@ -273,19 +273,23 @@ class XarrayImageReaderMixin:
         Returns
         -------
         timestamps : array_like
-            Array of timestamps of available images in the date
-            range. If self.daily average, the timestamps will be specified
-            as datetime.date, otherwise as datetime.datetime
+            Array of datetime.datetime timestamps of available images in the date
+            range.
         """
+        # evaluate the input to obtain the correct format
+        start, end = self._validate_start_end(start, end)
+
         if start == end:
             tstamps = [start]
         else:
-            start, end = self._validate_start_end(start, end)
             tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
 
-        if hasattr(self, "daily_image") and self.daily_average:
-            # remove time information and redundant values
-            tstamps = set([tstamp.date() for tstamp in tstamps])
+        if self.daily_average:
+            # remove redundant values referring to time 00:00:00
+            tstamps = list(map(
+                lambda date: datetime.datetime(date.year, date.month, date.day),
+                set([tstamp.date() for tstamp in tstamps])
+            ))
 
         return tstamps
 
@@ -390,7 +394,7 @@ class XarrayImageReaderMixin:
         self, timestamp: Union[datetime.datetime, str], **kwargs
     ) -> Image:
         """
-        Read a single image at a given timestamp. Raises `KeyError` if
+        Read a single image at a given timestamp. Raises `ReaderError` if
         timestamp is not available in the dataset.
 
         Parameters
@@ -411,14 +415,20 @@ class XarrayImageReaderMixin:
         if isinstance(timestamp, str):
             timestamp = mkdate(timestamp)
 
-        if hasattr(self, 'nested_timestamps') and timestamp in self.nested_timestamps.keys():
-            pass
-        elif timestamp in self.timestamps:
-            pass
-        else:  # pragma: no cover
-            raise ReaderError(
-                f"Timestamp {timestamp} is not available in the dataset!"
-            )
+        if hasattr(self, 'daily_average') and self.daily_average:
+            if timestamp in self.nested_timestamps.keys():
+                pass
+            else:  # pragma: no cover
+                raise ReaderError(
+                    f"Timestamp {timestamp} is not available in the dataset!"
+                )
+        else:
+            if timestamp in self.timestamps:
+                pass
+            else:  # pragma: no cover
+                raise ReaderError(
+                    f"Timestamp {timestamp} is not available in the dataset!"
+                )
 
         img = self.read_block(
             timestamp,
@@ -672,11 +682,14 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # maps sub-daily timestamps to the respective daily level
         nested = dict()
         for tstamp, path in self.filepaths.items():
+            # convert time to 00:00:00
             date = tstamp.date()
-            if date in nested.keys():
-                nested[date].append(tstamp)
+            daily_date = datetime.datetime(date.year, date.month, date.day)
+            # map sub-daily timestamps to the relative timestamp at midnight
+            if daily_date in nested.keys():
+                nested[daily_date].append(tstamp)
             else:
-                nested[date] = [tstamp]
+                nested[daily_date] = [tstamp]
 
         return nested
 
@@ -685,19 +698,23 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # average sub-daily images if selected
         if self.daily_average:
             sub_dss = []
-            # check that the timestamp has the correct (daily) level value
-            if timestamp not in self.nested_timestamps.keys():
-                ds = xr.open_dataset(
-                    self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
+            if timestamp not in self.nested_timestamps.keys() and timestamp in self.filepaths.keys():
+                raise ReaderError(
+                    "Reading individual sub-daily timestamps is not supported when 'daily_average'"
+                    "is set to 'True'. Set time to 00:00:00 to access the daily averaged value."
                 )
-            # if it is a sub-daily level timestamp, we read the file directly
-            else:
-                for sub_timestamp in self.nested_timestamps[timestamp]:
-                    sub_ds = xr.open_dataset(
-                        self.filepaths[sub_timestamp], chunks=self.chunks, cache=self.cache
-                    )
-                    sub_dss.append(sub_ds)
-                ds = xr.concat(sub_dss, dim=self.timename).mean(dim=self.timename)
+            elif timestamp not in self.nested_timestamps.keys() and timestamp not in self.filepaths.keys():
+                raise ReaderError(
+                    f"The provided timestamp {timestamp} is not available in the dataset!"
+                )
+
+            # collect all sub-daily timestamp datasets and average
+            for sub_timestamp in self.nested_timestamps[timestamp]:
+                sub_ds = xr.open_dataset(
+                    self.filepaths[sub_timestamp], chunks=self.chunks, cache=self.cache
+                )
+                sub_dss.append(sub_ds)
+            ds = xr.concat(sub_dss, dim=self.timename).mean(dim=self.timename)
 
         else:
             ds = xr.open_dataset(
@@ -1101,3 +1118,14 @@ class XarrayTSReader(XarrayReaderBase):
             data = self.data[{self.locdim: gpi}]
         df = data.to_pandas()[self.varnames]
         return df
+
+reader = DirectoryImageReader(
+    "/home/pstradio/scratch/SMOS_test/",
+    "Soil_Moisture",
+    locdim="n_grid_points",
+    pattern="SM_REPR_MIR_SMUDP2_*.nc",
+    fmt="SM_REPR_MIR_SMUDP2_%Y%m%dT%H%M%S_700_100_1.nc",
+    latname="Latitude",
+    lonname="Longitude",
+    daily_average=True
+)

@@ -415,20 +415,14 @@ class XarrayImageReaderMixin:
         if isinstance(timestamp, str):
             timestamp = mkdate(timestamp)
 
-        if hasattr(self, 'daily_average') and self.daily_average:
-            if timestamp in self.nested_timestamps.keys():
-                pass
-            else:  # pragma: no cover
-                raise ReaderError(
-                    f"Timestamp {timestamp} is not available in the dataset!"
-                )
+        if hasattr(self, "daily_average") and self.daily_average:
+            available_timestamps = list(self.nested_timestamps)
         else:
-            if timestamp in self.timestamps:
-                pass
-            else:  # pragma: no cover
-                raise ReaderError(
-                    f"Timestamp {timestamp} is not available in the dataset!"
-                )
+            available_timestamps = self.timestamps
+        if timestamp not in available_timestamps:
+            raise ReaderError(
+                f"Timestamp {timestamp} is not available in the dataset!"
+            )
 
         img = self.read_block(
             timestamp,

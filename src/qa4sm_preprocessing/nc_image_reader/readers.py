@@ -524,7 +524,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Default is False.
     timename : str, optional
         The name of the time coordinate, default is "time".
-    average_timestamps: bool, optional
+    daily_average: bool, optional
         If True, average the sub-daily inputs to obtain daily data.
     landmask : xr.DataArray or str, optional
         A land mask to be applied to reduce storage size. This can either be a
@@ -564,7 +564,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         locdim: str = None,
         lat: tuple = None,
         lon: tuple = None,
-        average_timestamps: bool = False,
+        daily_average: bool = False,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
@@ -603,7 +603,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             self.chunks = None
         self.cache = cache
 
-        self.average_timestamps = average_timestamps
+        self.average_timestamps = daily_average
 
         # now we can call the parent constructor using the dataset from the
         # first file

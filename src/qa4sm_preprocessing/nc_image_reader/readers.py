@@ -1118,14 +1118,3 @@ class XarrayTSReader(XarrayReaderBase):
             data = self.data[{self.locdim: gpi}]
         df = data.to_pandas()[self.varnames]
         return df
-
-reader = DirectoryImageReader(
-    "/home/pstradio/scratch/SMOS_test/",
-    "Soil_Moisture",
-    locdim="n_grid_points",
-    pattern="SM_REPR_MIR_SMUDP2_*.nc",
-    fmt="SM_REPR_MIR_SMUDP2_%Y%m%dT%H%M%S_700_100_1.nc",
-    latname="Latitude",
-    lonname="Longitude",
-    daily_average=True
-)

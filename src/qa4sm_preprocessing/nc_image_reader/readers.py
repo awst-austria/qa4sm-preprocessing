@@ -276,8 +276,18 @@ class XarrayImageReaderMixin:
             Array of datetime timestamps of available images in the date
             range.
         """
-        start, end = self._validate_start_end(start, end)
-        return list(filter(lambda t: t >= start and t <= end, self.timestamps))
+        if start == end:
+            tstamps = [start]
+        else:
+            start, end = self._validate_start_end(start, end)
+            tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
+
+        if self.average_timestamps:
+            tstamps = np.unique(
+                np.array([tstamp.date() for tstamp in tstamps])
+            )
+
+        return tstamps
 
     @abstractmethod
     def _read_block(
@@ -401,15 +411,10 @@ class XarrayImageReaderMixin:
         if isinstance(timestamp, str):
             timestamp = mkdate(timestamp)
 
-        if timestamp in self.timestamps:
+        if hasattr(self, 'nested_timestamps') and timestamp in self.nested_timestamps.keys():
             pass
-        elif hasattr(self, 'nested_timestamps'):
-            if timestamp in self.nested_timestamps.keys():
-                pass
-            else:
-                raise ReaderError(
-                    f"Timestamp {timestamp} is not available in the dataset!"
-                )
+        elif timestamp in self.timestamps:
+            pass
         else:  # pragma: no cover
             raise ReaderError(
                 f"Timestamp {timestamp} is not available in the dataset!"
@@ -638,11 +643,6 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                 else:
                     timestring = fname
                 tstamp = datetime.datetime.strptime(timestring, fmt)
-                # check if subdaily information is provided
-                if tstamp.time():
-                    self.subdaily = True
-                else:
-                    self.subdaily = False
                 self.filepaths[tstamp] = path
         else:
             for _, path in filepaths.items():
@@ -659,27 +659,17 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                         f" in {str(path)}"
                     )
                 tstamp = time[0].to_pydatetime()
-                # check if subdaily information is provided
-                if tstamp.time():
-                    self.subdaily = True
-                else:
-                    self.subdaily = False
                 self.filepaths[tstamp] = path
 
-        if self.average_timestamps and self.subdaily:
+        if self.average_timestamps:
             self.nested_timestamps = self._organize_subdaily()
-        elif self.average_timestamps and not self.subdaily:
-            raise ReaderError(
-                f"The option 'average_timestamps' was set to '{average_timestamps}', but the "
-                f"dataset does not have sub-daily values"
-            )
 
         # sort the timestamps according to date, because we might have to
         # return them sorted
         self.timestamps = sorted(list(self.filepaths))
 
     def _organize_subdaily(self):
-        # organizes sub-daily timestamps
+        # maps sub-daily timestamps to the respective daily level
         nested = dict()
         for tstamp, path in self.filepaths.items():
             date = tstamp.date()
@@ -718,15 +708,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     def _read_block(self, start: datetime.datetime, end: datetime.datetime) -> xr.Dataset:
         # Here we just read image file by image file within the given range and
         # concatenate them to a single dataset along the time dimension.
-        if start == end:
-            timestamps = [start]
-        else:
-            timestamps = self.tstamps_for_daterange(start, end)
-
-        if self.average_timestamps:
-            timestamps = np.unique(
-                np.array([tstamp.date() for tstamp in timestamps])
-            )
+        timestamps = self.tstamps_for_daterange(start, end)
 
         imgs = []
         for tstamp in timestamps:

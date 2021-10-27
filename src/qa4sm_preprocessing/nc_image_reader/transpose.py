@@ -131,9 +131,6 @@ def _transpose(
     # we need to mask the grid, because it doesn't support pickling
     grid = reader.grid
     reader.grid = None
-    # we also need to mask the timestamps, otherwise they are copied very
-    # often, which could lead to memory issues
-    reader.timestamps = None
 
     variable_fnames = []
     variable_chunks = []

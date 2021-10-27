@@ -32,7 +32,7 @@ import sys
 from repurpose.img2ts import Img2Ts
 
 from .readers import XarrayImageStackReader, DirectoryImageReader
-from .transpose import create_transposed_netcdf
+from .transpose import write_transposed_dataset
 from .utils import mkdate, str2bool
 
 
@@ -333,7 +333,7 @@ def repurpose(args):
 def transpose(args):
     parser = TransposeArgumentParser()
     reader, args = parse_args(parser, args)
-    create_transposed_netcdf(
+    write_transposed_dataset(
         reader,
         args.output_root,
         start=args.start,

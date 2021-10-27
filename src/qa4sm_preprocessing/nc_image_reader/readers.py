@@ -278,11 +278,7 @@ class XarrayImageReaderMixin:
         """
         # evaluate the input to obtain the correct format
         start, end = self._validate_start_end(start, end)
-
-        if start == end:
-            tstamps = list(filter(lambda t: t == start, self.timestamps))
-        else:
-            tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
+        tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
 
         return tstamps
 

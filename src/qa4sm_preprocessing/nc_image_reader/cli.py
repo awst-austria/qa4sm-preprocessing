@@ -153,6 +153,16 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             ),
         )
         self.add_argument(
+            "--daily_average",
+            type=str2bool,
+            default=False,
+            help=(
+                "Switch to average sub-daily images to the relative daily level."
+                "This will only be effective in case the dataset has a sub-daily"
+                "resolution."
+            )
+        )
+        self.add_argument(
             "--bbox",
             type=float,
             default=None,
@@ -291,6 +301,7 @@ def parse_args(parser, args):
             fmt=args.time_fmt,
             pattern=args.pattern,
             time_regex_pattern=args.time_regex_pattern,
+            daily_average=args.daily_average,
             **common_reader_kwargs,
         )
 

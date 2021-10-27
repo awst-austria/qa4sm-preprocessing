@@ -22,8 +22,8 @@ from pygeogrids.grids import gridfromdims, BasicGrid, CellGrid
 from pygeogrids.netcdf import load_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 
-from .exceptions import ReaderError
-from .utils import mkdate, infer_chunks
+from qa4sm_preprocessing.nc_image_reader.exceptions import ReaderError
+from qa4sm_preprocessing.nc_image_reader.utils import mkdate, infer_chunks
 
 
 class XarrayReaderBase:
@@ -273,11 +273,14 @@ class XarrayImageReaderMixin:
         Returns
         -------
         timestamps : array_like
-            Array of datetime timestamps of available images in the date
+            Array of datetime.datetime timestamps of available images in the date
             range.
         """
+        # evaluate the input to obtain the correct format
         start, end = self._validate_start_end(start, end)
-        return list(filter(lambda t: t >= start and t <= end, self.timestamps))
+        tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
+
+        return tstamps
 
     @abstractmethod
     def _read_block(
@@ -380,7 +383,7 @@ class XarrayImageReaderMixin:
         self, timestamp: Union[datetime.datetime, str], **kwargs
     ) -> Image:
         """
-        Read a single image at a given timestamp. Raises `KeyError` if
+        Read a single image at a given timestamp. Raises `ReaderError` if
         timestamp is not available in the dataset.
 
         Parameters
@@ -401,28 +404,28 @@ class XarrayImageReaderMixin:
         if isinstance(timestamp, str):
             timestamp = mkdate(timestamp)
 
-        if timestamp in self.timestamps:
-            img = self.read_block(
-                timestamp,
-                timestamp,
-                _apply_landmask_bbox=False
-            ).isel({self.timename: 0})
-            if self._has_regular_grid:
-                latname = self.latname if not self.curvilinear else self.latdim
-                lonname = self.lonname if not self.curvilinear else self.londim
-                img = img.stack(dimensions={"loc": (latname, lonname)})
-            data = {
-                varname: img[varname].values[self.grid.activegpis]
-                for varname in self.varnames
-            }
-            metadata = self.array_metadata
-            return Image(
-                self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp
-            )
-        else:  # pragma: no cover
+        if timestamp not in self.timestamps:
             raise ReaderError(
                 f"Timestamp {timestamp} is not available in the dataset!"
             )
+
+        img = self.read_block(
+            timestamp,
+            timestamp,
+            _apply_landmask_bbox=False
+        ).isel({self.timename: 0})
+        if self._has_regular_grid:
+            latname = self.latname if not self.curvilinear else self.latdim
+            lonname = self.lonname if not self.curvilinear else self.londim
+            img = img.stack(dimensions={"loc": (latname, lonname)})
+        data = {
+            varname: img[varname].values[self.grid.activegpis]
+            for varname in self.varnames
+        }
+        metadata = self.array_metadata
+        return Image(
+            self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp
+        )
 
 
 class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
@@ -510,6 +513,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Default is False.
     timename : str, optional
         The name of the time coordinate, default is "time".
+    daily_average: bool, optional
+        If True, average the sub-daily inputs to obtain daily data.
     landmask : xr.DataArray or str, optional
         A land mask to be applied to reduce storage size. This can either be a
         xr.DataArray of the same shape as the dataset images with ``False`` at
@@ -548,6 +553,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         locdim: str = None,
         lat: tuple = None,
         lon: tuple = None,
+        daily_average: bool = False,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
@@ -585,6 +591,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         else:
             self.chunks = None
         self.cache = cache
+
+        self.daily_average = daily_average
 
         # now we can call the parent constructor using the dataset from the
         # first file
@@ -641,15 +649,69 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                     )
                 tstamp = time[0].to_pydatetime()
                 self.filepaths[tstamp] = path
+
+        if self.daily_average:
+            self.nested_timestamps = self._organize_subdaily()
         # sort the timestamps according to date, because we might have to
         # return them sorted
-        self.timestamps = sorted(list(self.filepaths))
+        self._timestamps = sorted(list(self.filepaths))
+
+    @property
+    def timestamps(self):
+        if self.daily_average:
+            return list(self.nested_timestamps.keys())
+        else:
+            return self._timestamps
+
+    @timestamps.setter
+    def timestamps(self, value):
+        if self.daily_average:
+            raise NotImplementedError
+        else:
+            self._timestamps = value
+
+    def _organize_subdaily(self):
+        # maps sub-daily timestamps to the respective daily level
+        nested = dict()
+        for tstamp, path in self.filepaths.items():
+            # convert time to 00:00:00
+            date = tstamp.date()
+            daily_date = datetime.datetime(date.year, date.month, date.day)
+            # map sub-daily timestamps to the relative timestamp at midnight
+            if daily_date in nested.keys():
+                nested[daily_date].append(tstamp)
+            else:
+                nested[daily_date] = [tstamp]
+
+        return nested
 
     def _read_file(self, timestamp):
-        # reads a single file, does renaming, and selecting of levels
-        ds = xr.open_dataset(
-            self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
-        )
+        # reads file(s), does renaming, and selecting of levels
+        # average sub-daily images if selected
+        if self.daily_average:
+            sub_dss = []
+            if timestamp not in self.nested_timestamps.keys() and timestamp in self.filepaths.keys():
+                raise ReaderError(
+                    "Reading individual sub-daily timestamps is not supported when 'daily_average'"
+                    "is set to 'True'. Set time to 00:00:00 to access the daily averaged value."
+                )
+            elif timestamp not in self.nested_timestamps.keys() and timestamp not in self.filepaths.keys():
+                raise ReaderError(
+                    f"The provided timestamp {timestamp} is not available in the dataset!"
+                )
+
+            # collect all sub-daily timestamp datasets and average
+            for sub_timestamp in self.nested_timestamps[timestamp]:
+                sub_ds = xr.open_dataset(
+                    self.filepaths[sub_timestamp], chunks=self.chunks, cache=self.cache
+                )
+                sub_dss.append(sub_ds)
+            ds = xr.concat(sub_dss, dim=self.timename).mean(dim=self.timename)
+
+        else:
+            ds = xr.open_dataset(
+                self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
+            )
         if self.rename is not None:
             ds = ds.rename(self.rename)
         return self._select_vars_levels(ds)
@@ -657,10 +719,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     def _read_block(self, start: datetime.datetime, end: datetime.datetime) -> xr.Dataset:
         # Here we just read image file by image file within the given range and
         # concatenate them to a single dataset along the time dimension.
-        if start == end:
-            timestamps = [start]
-        else:
-            timestamps = self.tstamps_for_daterange(start, end)
+        timestamps = self.tstamps_for_daterange(start, end)
 
         imgs = []
         for tstamp in timestamps:

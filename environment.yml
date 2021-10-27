@@ -15,7 +15,7 @@ dependencies:
     - parse
     - pygeogrids>=0.4.0
     - pynetcf
-    - repurpose
+    - repurpose>=0.8
     - trollsift
     - pytest-cov
     - pytest

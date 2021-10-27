@@ -128,7 +128,6 @@ def _transpose(
     zarr_output = str(outfname).endswith(".zarr")
     new_last_dim = reader.timename
     timestamps = reader.tstamps_for_daterange(start, end)
-
     # we need to mask the grid, because it doesn't support pickling
     grid = reader.grid
     reader.grid = None

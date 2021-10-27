@@ -284,13 +284,6 @@ class XarrayImageReaderMixin:
         else:
             tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
 
-        if self.daily_average:
-            # remove redundant values referring to time 00:00:00
-            tstamps = list(map(
-                lambda date: datetime.datetime(date.year, date.month, date.day),
-                set([tstamp.date() for tstamp in tstamps])
-            ))
-
         return tstamps
 
     @abstractmethod
@@ -415,11 +408,7 @@ class XarrayImageReaderMixin:
         if isinstance(timestamp, str):
             timestamp = mkdate(timestamp)
 
-        if hasattr(self, "daily_average") and self.daily_average:
-            available_timestamps = list(self.nested_timestamps)
-        else:
-            available_timestamps = self.timestamps
-        if timestamp not in available_timestamps:
+        if timestamp not in self.timestamps:
             raise ReaderError(
                 f"Timestamp {timestamp} is not available in the dataset!"
             )
@@ -667,10 +656,23 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
 
         if self.daily_average:
             self.nested_timestamps = self._organize_subdaily()
-
         # sort the timestamps according to date, because we might have to
         # return them sorted
-        self.timestamps = sorted(list(self.filepaths))
+        self._timestamps = sorted(list(self.filepaths))
+
+    @property
+    def timestamps(self):
+        if self.daily_average:
+            return list(self.nested_timestamps.keys())
+        else:
+            return self._timestamps
+
+    @timestamps.setter
+    def timestamps(self, value):
+        if self.daily_average:
+            raise NotImplementedError
+        else:
+            self._timestamps = value
 
     def _organize_subdaily(self):
         # maps sub-daily timestamps to the respective daily level

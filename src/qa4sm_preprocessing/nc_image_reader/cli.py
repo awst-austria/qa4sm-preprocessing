@@ -330,7 +330,7 @@ def repurpose(args):
         outputpath=args.output_root,
         startdate=args.start,
         enddate=args.end,
-        ts_attributes=reader.dataset_metadata,
+        ts_attributes=reader.global_attrs,
         zlib=args.zlib,
         imgbuffer=args.imgbuffer,
         # this is necessary currently due to bug in repurpose

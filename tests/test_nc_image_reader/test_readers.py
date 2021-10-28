@@ -378,7 +378,7 @@ def test_SMOS(test_output_path):
         outputpath=str(outpath),
         startdate=reader.timestamps[0],
         enddate=reader.timestamps[-1],
-        ts_attributes=reader.dataset_metadata,
+        ts_attributes=reader.global_attrs,
         zlib=True,
         imgbuffer=3,
         cellsize_lat=5,

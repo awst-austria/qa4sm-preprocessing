@@ -114,14 +114,14 @@ class XarrayReaderBase:
 
         self.grid = self._grid_from_xarray(ds)
         (
-            self.dataset_metadata,
-            self.array_metadata,
+            self.global_attrs,
+            self.array_attrs,
         ) = self._metadata_from_xarray(ds)
 
     def _metadata_from_xarray(self, ds: xr.Dataset) -> Tuple[dict, dict]:
-        dataset_metadata = dict(ds.attrs)
-        array_metadata = {v: dict(ds[v].attrs) for v in self.varnames}
-        return dataset_metadata, array_metadata
+        global_attrs = dict(ds.attrs)
+        array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
+        return global_attrs, array_attrs
 
     def _grid_from_xarray(self, ds: xr.Dataset) -> CellGrid:
 
@@ -423,7 +423,7 @@ class XarrayImageReaderMixin:
             varname: img[varname].values[self.grid.activegpis]
             for varname in self.varnames
         }
-        metadata = self.array_metadata
+        metadata = self.array_attrs
         return Image(
             self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp
         )
@@ -662,7 +662,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         self._timestamps = sorted(list(self.filepaths))
 
         if discard_attrs:
-            self.dataset_metadata = None
+            self.global_attrs = None
+            self.array_attrs = None
 
     @property
     def timestamps(self):
@@ -755,8 +756,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             compat="override",
         ).assign_coords({self.timename: timestamps})
 
-        for varname in self.array_metadata:
-            block[varname].attrs.update(self.array_metadata[varname])
+        for varname in self.array_attrs:
+            block[varname].attrs.update(self.array_attrs[varname])
         return block
 
 

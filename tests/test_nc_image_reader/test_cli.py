@@ -32,9 +32,9 @@ def cli_args_lis(test_output_path):
         *("--lon", "-11.375", "0.25"),
     ]
 
-@pytest.mark.skip(
-    reason="Function nc_image_reader.transpose._traspose is not compatible and should be updated"
-)
+# @pytest.mark.skip(
+#     reason="Function nc_image_reader.transpose._traspose is not compatible and should be updated"
+# )
 def test_transpose_lis(cli_args_lis, lis_noahmp_stacked):
     args = cli_args_lis
     args[1] = args[1] + "/lis_noahmp_transposed.nc"

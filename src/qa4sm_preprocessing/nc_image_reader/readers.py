@@ -5,7 +5,6 @@ readers from the TUW-GEO python package universe (e.g. pygeobase, pynetcf).
 
 from abc import abstractmethod
 import datetime
-import fnmatch
 import logging
 import numpy as np
 import os
@@ -30,7 +29,7 @@ class XarrayReaderBase:
     """
     Base class for readers backed by xarray objects (images, image stacks,
     timeseries).
-    
+
     This base class provides methods to infer grid information and metadata
     from the stack and set them up for use in reading methods.
 
@@ -282,6 +281,10 @@ class XarrayImageReaderMixin:
 
         return tstamps
 
+    @property
+    def timestamps(self):
+        return self._timestamps
+
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
@@ -410,9 +413,7 @@ class XarrayImageReaderMixin:
             )
 
         img = self.read_block(
-            timestamp,
-            timestamp,
-            _apply_landmask_bbox=False
+            timestamp, timestamp, _apply_landmask_bbox=False
         ).isel({self.timename: 0})
         if self._has_regular_grid:
             latname = self.latname if not self.curvilinear else self.latdim
@@ -571,8 +572,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # that match our pattern
         directory = Path(directory)
         filepaths = {}
-        for fpath in glob.glob(
-            str(Path(directory) / f"**/{pattern}"), recursive=True
+        for fpath in sorted(
+            glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True)
         ):
             fname = Path(fpath).name
             filepaths[fname] = fpath
@@ -670,17 +671,11 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         else:
             return self._timestamps
 
-    @timestamps.setter
-    def timestamps(self, value):
-        if self.daily_average:
-            raise NotImplementedError
-        else:
-            self._timestamps = value
-
     def _organize_subdaily(self):
         # maps sub-daily timestamps to the respective daily level
         nested = dict()
-        for tstamp, path in self.filepaths.items():
+        for tstamp in sorted(self.filepaths):
+            path = self.filepaths[tstamp]
             # convert time to 00:00:00
             date = tstamp.date()
             daily_date = datetime.datetime(date.year, date.month, date.day)
@@ -697,23 +692,40 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # average sub-daily images if selected
         if self.daily_average:
             sub_dss = []
-            if timestamp not in self.nested_timestamps.keys() and timestamp in self.filepaths.keys():
+            if (
+                timestamp not in self.nested_timestamps.keys()
+                and timestamp in self.filepaths.keys()
+            ):
                 raise ReaderError(
-                    "Reading individual sub-daily timestamps is not supported when 'daily_average'"
-                    "is set to 'True'. Set time to 00:00:00 to access the daily averaged value."
+                    "Reading individual sub-daily timestamps is not supported"
+                    " when 'daily_average' is set to 'True'. Set time to"
+                    " 00:00:00 to access the daily averaged value."
                 )
-            elif timestamp not in self.nested_timestamps.keys() and timestamp not in self.filepaths.keys():
+            elif (
+                timestamp not in self.nested_timestamps.keys()
+                and timestamp not in self.filepaths.keys()
+            ):
                 raise ReaderError(
-                    f"The provided timestamp {timestamp} is not available in the dataset!"
+                    f"The provided timestamp {timestamp} is not available in"
+                    " the dataset!"
                 )
 
             # collect all sub-daily timestamp datasets and average
             for sub_timestamp in self.nested_timestamps[timestamp]:
                 sub_ds = xr.open_dataset(
-                    self.filepaths[sub_timestamp], chunks=self.chunks, cache=self.cache
+                    self.filepaths[sub_timestamp],
+                    chunks=self.chunks,
+                    cache=self.cache,
                 )
                 sub_dss.append(sub_ds)
-            ds = xr.concat(sub_dss, dim=self.timename).mean(dim=self.timename)
+            ds = xr.concat(
+                sub_dss,
+                dim=self.timename,
+                coords="minimal",
+                join="override",
+                combine_attrs="override",
+                compat="override",
+            ).mean(dim=self.timename)
 
         else:
             ds = xr.open_dataset(
@@ -723,7 +735,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             ds = ds.rename(self.rename)
         return self._select_vars_levels(ds)
 
-    def _read_block(self, start: datetime.datetime, end: datetime.datetime) -> xr.Dataset:
+    def _read_block(
+        self, start: datetime.datetime, end: datetime.datetime
+    ) -> xr.Dataset:
         # Here we just read image file by image file within the given range and
         # concatenate them to a single dataset along the time dimension.
         timestamps = self.tstamps_for_daterange(start, end)
@@ -732,9 +746,14 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         for tstamp in timestamps:
             imgs.append(self._read_file(tstamp))
 
-        block = xr.concat(imgs, dim=self.timename).assign_coords(
-            {self.timename: timestamps}
-        )
+        block = xr.concat(
+            imgs,
+            dim=self.timename,
+            coords="minimal",
+            join="override",
+            combine_attrs="override",
+            compat="override",
+        ).assign_coords({self.timename: timestamps})
 
         for varname in self.array_metadata:
             block[varname].attrs.update(self.array_metadata[varname])
@@ -843,10 +862,10 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
 
         if isinstance(ds, (str, Path)):
             if use_dask:
-                chunks = "auto"
+                self.chunks = "auto"
             else:
-                chunks = None
-            ds = xr.open_dataset(ds, chunks=chunks)
+                self.chunks = None
+            ds = xr.open_dataset(ds, chunks=self.chunks)
         super().__init__(
             ds,
             varnames,
@@ -865,9 +884,11 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
             curvilinear=curvilinear,
         )
         self.data = self._select_vars_levels(ds)
-        self.timestamps = ds.indexes[self.timename].to_pydatetime()
+        self._timestamps = ds.indexes[self.timename].to_pydatetime()
 
-    def _read_block(self, start: datetime.datetime, end: datetime.datetime) -> xr.DataArray:
+    def _read_block(
+        self, start: datetime.datetime, end: datetime.datetime
+    ) -> xr.DataArray:
         return self.data.sel({self.timename: slice(start, end)})
 
 
@@ -951,7 +972,7 @@ class XarrayTSReader(XarrayReaderBase):
     the time dimension is either the last dimension in your netcdf (the fastest
     changing dimension), or that it is chunked in a way that makes timeseries
     access fast. To move the time dimension last, you can use the function
-    ``nc_image_reader.transpose.create_transposed_netcdf`` or programs like
+    ``nc_image_reader.transpose.write_transposed_dataset`` or programs like
     ``ncpdq``.
 
 

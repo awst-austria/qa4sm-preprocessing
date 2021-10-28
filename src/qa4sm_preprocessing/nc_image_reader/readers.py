@@ -114,14 +114,14 @@ class XarrayReaderBase:
 
         self.grid = self._grid_from_xarray(ds)
         (
-            self.dataset_metadata,
-            self.array_metadata,
+            self.global_attrs,
+            self.array_attrs,
         ) = self._metadata_from_xarray(ds)
 
     def _metadata_from_xarray(self, ds: xr.Dataset) -> Tuple[dict, dict]:
-        dataset_metadata = dict(ds.attrs)
-        array_metadata = {v: dict(ds[v].attrs) for v in self.varnames}
-        return dataset_metadata, array_metadata
+        global_attrs = dict(ds.attrs)
+        array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
+        return global_attrs, array_attrs
 
     def _grid_from_xarray(self, ds: xr.Dataset) -> CellGrid:
 
@@ -423,7 +423,7 @@ class XarrayImageReaderMixin:
             varname: img[varname].values[self.grid.activegpis]
             for varname in self.varnames
         }
-        metadata = self.array_metadata
+        metadata = self.array_attrs
         return Image(
             self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp
         )
@@ -536,6 +536,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     use_dask : bool, optional
         Whether to open image files using dask. This might be useful in case
         you run into memory issues.
+    discard_attrs : bool, optional
+        Whether to discard the attributes of the input netCDF files (reduced
+        data size).
     """
 
     def __init__(
@@ -562,6 +565,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         use_dask: bool = False,
         cache: bool = False,
         curvilinear: bool = False,
+        discard_attrs: bool = False,
     ):
 
         # first, we walk over the whole directory subtree and find any files
@@ -657,6 +661,10 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # return them sorted
         self._timestamps = sorted(list(self.filepaths))
 
+        if discard_attrs:
+            self.global_attrs = None
+            self.array_attrs = None
+
     @property
     def timestamps(self):
         if self.daily_average:
@@ -748,8 +756,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             compat="override",
         ).assign_coords({self.timename: timestamps})
 
-        for varname in self.array_metadata:
-            block[varname].attrs.update(self.array_metadata[varname])
+        for varname in self.array_attrs:
+            block[varname].attrs.update(self.array_attrs[varname])
         return block
 
 

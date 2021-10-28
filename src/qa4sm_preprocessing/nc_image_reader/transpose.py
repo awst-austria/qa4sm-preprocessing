@@ -254,7 +254,7 @@ def _transpose(
         join="override",
         combine_attrs="override",
     )
-    ds.attrs.update(reader.dataset_metadata)
+    ds.attrs.update(reader.global_attrs)
     encoding = {
         var: {
             "chunksizes": variable_chunksizes[var],
@@ -352,7 +352,7 @@ def _transpose_no_dask(
         logging.debug(f"Reading {str(fname)}")
         arr = da.from_zarr(fname)
         dims = variable_dims[varname]
-        metadata = reader.array_metadata[varname]
+        metadata = reader.array_attrs[varname]
         if chunks is None:
             if zarr_output:
                 chunks = infer_chunks(new_dim_sizes, 100, dtype)
@@ -387,7 +387,7 @@ def _transpose_no_dask(
         variable_arrays,
         coords=coords,
     )
-    ds.attrs.update(reader.dataset_metadata)
+    ds.attrs.update(reader.global_attrs)
 
     logging.info(
         f"write_transposed_dataset: Writing combined file to {str(outfname)}"

@@ -535,6 +535,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     use_dask : bool, optional
         Whether to open image files using dask. This might be useful in case
         you run into memory issues.
+    discard_attrs : bool, optional
+        Whether to discard the attributes of the input netCDF files (reduced
+        data size).
     """
 
     def __init__(
@@ -561,6 +564,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         use_dask: bool = False,
         cache: bool = False,
         curvilinear: bool = False,
+        discard_attrs: bool = False,
     ):
 
         # first, we walk over the whole directory subtree and find any files
@@ -655,6 +659,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # sort the timestamps according to date, because we might have to
         # return them sorted
         self._timestamps = sorted(list(self.filepaths))
+
+        if discard_attrs:
+            self.dataset_metadata = None
 
     @property
     def timestamps(self):

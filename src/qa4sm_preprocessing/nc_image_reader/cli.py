@@ -163,6 +163,15 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             )
         )
         self.add_argument(
+            "--discard_attrs",
+            type=str2bool,
+            default=False,
+            help=(
+                "Switch to discard the global attributes present in the "
+                "netCDF files of the input dataset."
+            )
+        )
+        self.add_argument(
             "--bbox",
             type=float,
             default=None,
@@ -302,6 +311,7 @@ def parse_args(parser, args):
             pattern=args.pattern,
             time_regex_pattern=args.time_regex_pattern,
             daily_average=args.daily_average,
+            discard_attrs=args.discard_attrs,
             **common_reader_kwargs,
         )
 

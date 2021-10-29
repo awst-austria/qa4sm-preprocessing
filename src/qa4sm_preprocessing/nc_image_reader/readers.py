@@ -662,8 +662,11 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         self._timestamps = sorted(list(self.filepaths))
 
         if discard_attrs:
-            self.global_attrs = None
-            self.array_attrs = None
+            self.discard_attrs()
+
+    def discard_attrs(self):
+        self.global_attrs = {}
+        self.array_attrs = {v: {} for v in self.varnames}
 
     @property
     def timestamps(self):
@@ -757,7 +760,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         ).assign_coords({self.timename: timestamps})
 
         for varname in self.array_attrs:
-            block[varname].attrs.update(self.array_attrs[varname])
+            block[varname].attrs = self.array_attrs[varname]
+        block.attrs = self.global_attrs
         return block
 
 
@@ -889,8 +893,9 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
 
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
-    ) -> xr.DataArray:
-        return self.data.sel({self.timename: slice(start, end)})
+    ) -> xr.Dataset:
+        block = self.data.sel({self.timename: slice(start, end)})
+        return block
 
 
 class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):

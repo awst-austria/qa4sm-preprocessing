@@ -41,6 +41,9 @@ def latlon_test_dataset():
         {"X": (["time", "lat", "lon"], X)},
         coords={"time": time, "lat": lat, "lon": lon},
     )
+    ds.X.attrs["unit"] = "m"
+    ds.X.attrs["long_name"] = "eks"
+    ds.attrs["description"] = "test dataset"
     return ds
 
 

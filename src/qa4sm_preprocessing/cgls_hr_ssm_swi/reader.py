@@ -146,8 +146,8 @@ class S1CglsTs(GriddedNcOrthoMultiTs):
             data = data.apply(applyf, axis=1, **applyf_kwargs)
             data = data.to_frame(name=self.parameters[0])
             data = pd.DataFrame(data)
-        else:
-            data = pd.DataFrame(columns=self.parameters[0])
+        elif applyf is not None and data.empty:
+            data = pd.DataFrame(columns=self.parameters)
 
         return data
 

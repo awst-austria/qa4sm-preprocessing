@@ -19,7 +19,7 @@ from qa4sm_preprocessing.nc_image_reader.utils import mkdate
 from pytest import test_data_path
 
 
-def validate_reader(reader):
+def validate_reader(reader, metadata=True):
 
     expected_timestamps = pd.date_range(
         "2017-03-30 00:00", periods=6, freq="D"
@@ -35,7 +35,10 @@ def validate_reader(reader):
         / "LIS_HIST_201703300000.d01.nc"
     )["SoilMoist_inst"].isel(SoilMoist_profiles=0)
     np.testing.assert_allclose(img.data["SoilMoist_inst"], true.values.ravel())
-    true.attrs == img.metadata["SoilMoist_inst"]
+    if metadata:
+        true.attrs == img.metadata["SoilMoist_inst"]
+    else:
+        assert img.metadata["SoilMoist_inst"] == {}
 
     img = reader.read(expected_timestamps[-1])
     true = xr.open_dataset(
@@ -45,7 +48,40 @@ def validate_reader(reader):
         / "LIS_HIST_201704040000.d01.nc"
     )["SoilMoist_inst"].isel(SoilMoist_profiles=0)
     np.testing.assert_allclose(img.data["SoilMoist_inst"], true.values.ravel())
-    true.attrs == img.metadata["SoilMoist_inst"]
+    if metadata:
+        true.attrs == img.metadata["SoilMoist_inst"]
+    else:
+        assert img.metadata["SoilMoist_inst"] == {}
+
+    # metadata for read_block
+    block = reader.read_block(expected_timestamps[0], expected_timestamps[0])
+    if metadata:
+        true = xr.open_dataset(
+            test_data_path
+            / "lis_noahmp"
+            / "201703"
+            / "LIS_HIST_201703300000.d01.nc"
+        )
+        assert true.attrs.keys() == block.attrs.keys()
+        assert all(
+            [np.all(block.attrs[key] == true.attrs[key]) for key in true.attrs]
+        )
+        assert (
+            true["SoilMoist_inst"].attrs.keys()
+            == block["SoilMoist_inst"].attrs.keys()
+        )
+        assert all(
+            [
+                np.all(
+                    block["SoilMoist_inst"].attrs[key]
+                    == true["SoilMoist_inst"].attrs[key]
+                )
+                for key in true["SoilMoist_inst"].attrs
+            ]
+        )
+    else:
+        assert block.attrs == {}
+        assert block["SoilMoist_inst"].attrs == {}
 
 
 ###############################################################################
@@ -131,12 +167,10 @@ def test_time_regex():
 
 
 def test_read_block(default_directory_reader):
-    block = default_directory_reader.read_block()["SoilMoist_inst"]
-    assert block.shape == (6, 100, 50)
+    block = default_directory_reader.read_block()
+    assert block["SoilMoist_inst"].shape == (6, 100, 50)
 
-    reader = XarrayImageStackReader(
-        block.to_dataset(name="SoilMoist_inst"), "SoilMoist_inst"
-    )
+    reader = XarrayImageStackReader(block, "SoilMoist_inst")
     validate_reader(reader)
 
     start_date = next(iter(default_directory_reader.timestamps))
@@ -144,6 +178,12 @@ def test_read_block(default_directory_reader):
         start=start_date, end=start_date
     )["SoilMoist_inst"]
     assert block.shape == (1, 100, 50)
+
+
+def test_no_metadata(default_directory_reader):
+    reader = default_directory_reader
+    reader.discard_attrs()
+    validate_reader(reader, metadata=False)
 
 
 ###############################################################################
@@ -162,6 +202,14 @@ def test_read_block(default_directory_reader):
 
 def test_xarray_reader_basic(default_xarray_reader):
     validate_reader(default_xarray_reader)
+
+
+def test_metadata(latlon_test_dataset):
+    reader = XarrayImageStackReader(latlon_test_dataset, "X")
+    block = reader.read_block()
+    assert block["X"].shape == (100, 10, 20)
+    assert block.attrs == {"description": "test dataset"}
+    assert block["X"].attrs == {"unit": "m", "long_name": "eks"}
 
 
 def test_nonstandard_names(latlon_test_dataset):

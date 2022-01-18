@@ -76,6 +76,8 @@ def unstructured_test_dataset(latlon_test_dataset):
     ds["longitude"] = ds.lon
     ds = ds.drop_vars("location").rename(
         {"latitude": "lat", "longitude": "lon"}
+    ).assign_coords(
+        {"lat": ("location", ds.lat), "lon": ("location", ds.lon)}
     )
     return ds
 

@@ -9,7 +9,7 @@ from multiprocessing.pool import ThreadPool
 import numpy as np
 from pathlib import Path
 from tqdm.auto import tqdm
-from typing import Union, TypeVar, Tuple, Sequence
+from typing import Union, TypeVar, Tuple
 import xarray as xr
 import shutil
 import warnings
@@ -28,7 +28,7 @@ def write_transposed_dataset(
     outfname: Union[Path, str],
     start: datetime.datetime = None,
     end: datetime.datetime = None,
-    chunks: Tuple = None,
+    chunks: dict = None,
     memory: float = 2,
     n_threads: int = 4,
     zlib: bool = True,
@@ -52,9 +52,8 @@ def write_transposed_dataset(
         If not given, start at first timestamp in dataset.
     end : datetime.datetime, optional
         If not given, end at last timestamp in dataset.
-    chunks : tuple, optional
-        The chunk sizes that are used for the transposed file. The dimension
-        order must correspond to the order of the transposed file. If none is
+    chunks : dictionary, optional
+        The chunk sizes that are used for the transposed file. If none are
         given, chunks with a size of 1MB are used for netCDF, and chunks with a
         size of 50MB are used for zarr output.
     memory : float, optional
@@ -159,7 +158,8 @@ def _get_intermediate_chunks(array, chunks, new_last_dim, zarr_output, memory):
 
     # figure out temporary chunk sizes based on image size and available memory
     size = dtype.itemsize
-    chunksize_MB = np.prod(list(chunks.values())[:-1]) * size / 1024 ** 2
+    chunksizes = [size if size != -1 else dims[dim] for dim, size in chunks.items()]
+    chunksize_MB = np.prod(chunksizes) * size / 1024 ** 2
     img_shape = transposed_shape[:-1]
     len_time = transposed_shape[-1]
     imagesize_GB = np.prod(img_shape) * size / 1024 ** 3
@@ -213,6 +213,7 @@ def _transpose(
                 "Skipping generating intermediate file {tmp_outfname}"
                 " because it exists"
             )
+            continue
 
         tmp_chunks = _get_intermediate_chunks(
             ds[var], chunks, new_last_dim, zarr_output, memory
@@ -267,7 +268,11 @@ def _transpose(
     if not zarr_output:
         ds.to_netcdf(outfname, encoding=encoding)
     else:
-        ds.to_zarr(outfname, encoding=encoding, mode="w", consolidated=True)
+        for var in reader.varnames:
+            del ds[var].encoding["chunks"]
+            del ds[var].encoding["preferred_chunks"]
+            ds[var] = ds[var].chunk(variable_chunksizes[var])
+        ds.to_zarr(outfname, mode="w", consolidated=True)
 
     for var in reader.varnames:
         shutil.rmtree(variable_intermediate_fnames[var])

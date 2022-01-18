@@ -55,6 +55,7 @@ class XarrayReaderBase:
         bbox: Iterable = None,
         cellsize: float = None,
         curvilinear: bool = False,
+        rename: dict = None,
     ):
         if isinstance(varnames, str):
             varnames = [varnames]
@@ -67,6 +68,7 @@ class XarrayReaderBase:
             self.level = {self.varnames[0]: level}
         else:
             self.level = level
+        self.rename = rename
         self.timename = timename
         if latname is None:
             self.latname = "lat"
@@ -112,6 +114,10 @@ class XarrayReaderBase:
         else:
             self.landmask = landmask
 
+        ds = self._select_levels(ds)
+        if self.rename is not None:
+            ds = ds.rename(self.rename)
+        ds = ds[self.varnames]
         self.grid = self._grid_from_xarray(ds)
         (
             self.global_attrs,
@@ -187,8 +193,11 @@ class XarrayReaderBase:
             # given via their coordinate name, and they will be 2D arrays
             return ds[cname]
         if _coord is not None:
-            start, step = _coord
-            coord = np.array([start + i * step for i in range(dimlen)])
+            if isinstance(_coord, (list, tuple)) and len(_coord) == 2:
+                start, step = _coord
+                coord = np.array([start + i * step for i in range(dimlen)])
+            elif isinstance(_coord, np.ndarray):
+                coord = _coord
         else:
             # infer coordinate from variable in dataset
             coord = ds[cname]
@@ -215,12 +224,34 @@ class XarrayReaderBase:
             name=cname,
         )
 
-    def _select_vars_levels(self, ds):
-        ds = ds[self.varnames]
+    def _select_levels(self, ds):
         if self.level is not None:
             for varname in self.level:
-                ds[varname] = ds[varname].isel(self.level[varname])
+                variable_levels = self._select_levels_iteratively(
+                    varname, ds[varname], self.level[varname]
+                )
+                if len(variable_levels) == 1:
+                    ds[varname] = variable_levels[0][1]
+                else:
+                    del ds[varname]
+                    for name, arr in variable_levels:
+                        ds[name] = arr
         return ds
+
+    def _select_levels_iteratively(self, name, arr, leveldict):
+        # input list: list of (name, arr, leveldict)
+        output_list = [(name, arr)]
+        for levelname, idx in leveldict.items():
+            if not isinstance(idx, list):
+                idx = [idx]
+            tmp_list = []
+            for name, arr in output_list:
+                for i in idx:
+                    tmparr = arr.isel({levelname: i})
+                    tmpname = name + "_" + str(i)
+                    tmp_list.append((tmpname, tmparr))
+            output_list = tmp_list
+        return output_list
 
 
 class XarrayImageReaderMixin:
@@ -454,6 +485,11 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         pass ``{"Y": {"level": 2}}``.
         In case you only want read a single variable, you can also pass the
         dictionary directly, e.g. ``{"level": 2}``.
+        It is also possible to read multiple levels by passing a list instead
+        of a single index, .e.g. ``{"Y": {"level": [2, 3]}}``. In this case the
+        resulting variables are named ``Y_2`` and ``Y_3``. Level selection is
+        applied before renaming, so you can rename the ugly level names to
+        nicer ones.
     fmt : str, optional
         Format string to deduce timestamp from filename (without directory
         name). If it is ``None`` (default), the timestamps will be obtained
@@ -531,8 +567,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Spatial coverage of a single cell file in degrees. Default is ``None``.
     rename : dict, optional
         Dictionary to use to rename variables in the file. This is applied
-        before anything else, so all other parameters referring to variable
-        names should use the new names.
+        after level selection, so all other parameters referring to variable
+        names except 'level' should use the new names.
     use_dask : bool, optional
         Whether to open image files using dask. This might be useful in case
         you run into memory issues.
@@ -571,25 +607,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # first, we walk over the whole directory subtree and find any files
         # that match our pattern
         directory = Path(directory)
-        filepaths = {}
-        for fpath in sorted(
-            glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True)
-        ):
-            fname = Path(fpath).name
-            filepaths[fname] = fpath
-
-        if not filepaths:  # pragma: no cover
-            raise ReaderError(
-                f"No files matching pattern {pattern} in directory "
-                f"{str(directory)}"
-            )
-
-        # We need to read the first file so that the parent constructor can
-        # deduce the grid from it.
-        ds = xr.open_dataset(next(iter(filepaths.values())))
-        self.rename = rename
-        if self.rename is not None:
-            ds = ds.rename(self.rename)
+        filepaths = self._get_filepaths(directory, pattern)
+        ds = self._get_example_dataset(filepaths)
 
         if use_dask:
             self.chunks = -1
@@ -617,6 +636,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             bbox=bbox,
             cellsize=cellsize,
             curvilinear=curvilinear,
+            rename=rename,
         )
 
         # if possible, deduce the timestamps from the filenames and create a
@@ -691,6 +711,27 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
 
         return nested
 
+    def _get_filepaths(self, directory, pattern):
+        filepaths = {}
+        for fpath in sorted(
+            glob.glob(str(directory / f"**/{pattern}"), recursive=True)
+        ):
+            fname = Path(fpath).name
+            filepaths[fname] = fpath
+
+        if not filepaths:  # pragma: no cover
+            raise ReaderError(
+                f"No files matching pattern {pattern} in directory "
+                f"{str(directory)}"
+            )
+        return filepaths
+
+    def _get_example_dataset(self, filepaths):
+        # We need to read the first file so that the parent constructor can
+        # deduce the grid from it.
+        ds = xr.open_dataset(next(iter(filepaths.values())))
+        return ds
+
     def _read_file(self, timestamp):
         # reads file(s), does renaming, and selecting of levels
         # average sub-daily images if selected
@@ -735,9 +776,10 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             ds = xr.open_dataset(
                 self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
             )
+        ds = self._select_levels(ds)
         if self.rename is not None:
             ds = ds.rename(self.rename)
-        return self._select_vars_levels(ds)
+        return ds[self.varnames]
 
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
@@ -888,7 +930,7 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
             cellsize=cellsize,
             curvilinear=curvilinear,
         )
-        self.data = self._select_vars_levels(ds)
+        self.data = self._select_levels(ds)[self.varnames]
         self._timestamps = ds.indexes[self.timename].to_pydatetime()
 
     def _read_block(
@@ -1098,11 +1140,11 @@ class XarrayTSReader(XarrayReaderBase):
             # we have to reshape the data
             latdim = self.latdim if self.latdim is not None else self.latname
             londim = self.londim if self.londim is not None else self.lonname
-            self.orig_data = self._select_vars_levels(ds)
+            self.orig_data = self._select_levels(ds)[self.varnames]
             self.data = self.orig_data.stack({"loc": (latdim, londim)})
             self.locdim = "loc"
         else:
-            self.data = self._select_vars_levels(ds)
+            self.data = self._select_levels(ds)[self.varnames]
 
     def read(self, *args, **kwargs) -> pd.Series:
         """

@@ -394,7 +394,7 @@ def test_image_time_dimension(test_output_path):
             outpath,
             varnames=["X"],
             fmt="img_%Y%m%dT%H%M%S.nc",
-            daily_average=True,
+            average="daily",
         )
         assert reader.timestamps[0] < reader.timestamps[-1]
         for i, tstamp in enumerate(reader.timestamps):

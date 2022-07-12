@@ -153,14 +153,13 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             ),
         )
         self.add_argument(
-            "--daily_average",
-            type=str2bool,
-            default=False,
+            "--average",
+            type=str,
+            default=None,
             help=(
-                "Switch to average sub-daily images to the relative daily"
-                " level. This will only be effective in case the dataset"
-                " has a sub-daily resolution."
-            ),
+                "Can be set to 'daily' for getting daily averages if the"
+                " dataset has a sub-daily resolution."
+            )
         )
         self.add_argument(
             "--discard_attrs",
@@ -304,17 +303,13 @@ def parse_args(parser, args):
             input_path, args.parameter, **common_reader_kwargs,
         )
     else:
-        if args.daily_average:
-            average = "daily"
-        else:
-            average = None
         reader = DirectoryImageReader(
             input_path,
             args.parameter,
             fmt=args.time_fmt,
             pattern=args.pattern,
             time_regex_pattern=args.time_regex_pattern,
-            average=average,
+            average=args.average,
             discard_attrs=args.discard_attrs,
             **common_reader_kwargs,
         )

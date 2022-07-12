@@ -64,18 +64,3 @@ def reshuffle(input_root,
                         cellsize_lon=5.0, global_attr=global_attrs, zlib=True,
                         unlim_chunksize=1000, ts_attributes=metadata)
     reshuffler.calc()
-
-if __name__ == '__main__':
-    from datetime import datetime
-    from qa4sm_preprocessing.cgls_hr_ssm_swi.reader import S1CglsTs
-    #input = "/data-read/USERS/wpreimes/temp/CGLS_SWI1km_V1.0_img/"
-    input = "/home/wpreimes/shares/home/code/qa4sm-preprocessing/tests/test-data/CGLS_SWI1km_V1.0_img"
-    output =  "/data-write/USERS/wpreimes/temp/test/"
-    reshuffle(input, output, datetime(2017,6, 1, 12), datetime(2017,6,3,12),
-              bbox=[44.90625, 44.92411, -0.969, -0.9597],
-              parameters=None, hours=(12,),
-              fname_templ="c_gls_SWI1km_{datetime}_CEURO_SCATSAR_V*.nc",
-              datetime_format="%Y%m%d%H%M")
-
-    ds = S1CglsTs(output)
-    ds.grid.get_grid_points()

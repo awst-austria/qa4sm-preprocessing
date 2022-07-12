@@ -4,6 +4,8 @@ readers from the TUW-GEO python package universe (e.g. pygeobase, pynetcf).
 """
 
 from abc import abstractmethod
+import dask
+import dask.array as da
 import datetime
 import logging
 import numpy as np
@@ -12,7 +14,8 @@ import glob
 import pandas as pd
 from pathlib import Path
 import re
-from typing import Union, Iterable, List, Tuple, Sequence
+from tqdm.auto import tqdm
+from typing import Union, Iterable, List, Tuple, Sequence, Dict
 import warnings
 import xarray as xr
 
@@ -21,8 +24,8 @@ from pygeogrids.grids import gridfromdims, BasicGrid, CellGrid
 from pygeogrids.netcdf import load_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 
-from qa4sm_preprocessing.nc_image_reader.exceptions import ReaderError
-from qa4sm_preprocessing.nc_image_reader.utils import mkdate, infer_chunks
+from .exceptions import ReaderError
+from .utils import mkdate, infer_chunksizes
 
 
 class XarrayReaderBase:
@@ -56,6 +59,8 @@ class XarrayReaderBase:
         cellsize: float = None,
         curvilinear: bool = False,
         rename: dict = None,
+        construct_grid: bool = True,
+        grid: BasicGrid = None,
     ):
         if isinstance(varnames, str):
             varnames = [varnames]
@@ -90,7 +95,8 @@ class XarrayReaderBase:
             or locdim is not None
         ):
             raise ReaderError(
-                "For curvilinear grids, lat/lon-dim and lat/lon-name must be given."
+                "For curvilinear grids, lat/lon-dim and lat/lon-name must "
+                "be given."
             )
         if locdim is not None and (
             latname is None or lonname is None
@@ -100,7 +106,8 @@ class XarrayReaderBase:
             )
         self._lat = lat
         self._lon = lon
-        self._has_regular_grid = locdim is None
+        self._has_2d_grid = locdim is None
+        self._has_regular_grid = self._has_2d_grid and not self.curvilinear
         self.bbox = bbox
         self.cellsize = cellsize
         # Landmask can be "<filename>:<variable_name>", "<variable_name>", or a
@@ -114,15 +121,27 @@ class XarrayReaderBase:
         else:
             self.landmask = landmask
 
+        ##########################################
+
+        # get metadata
         ds = self._select_levels(ds)
         if self.rename is not None:
             ds = ds.rename(self.rename)
-        ds = ds[self.varnames]
-        self.grid = self._grid_from_xarray(ds)
         (
             self.global_attrs,
             self.array_attrs,
         ) = self._metadata_from_xarray(ds)
+
+        # set up coordinates and grid
+        if grid is None:
+            self.lat = self._coord_from_xarray(ds, "lat")
+            self.lon = self._coord_from_xarray(ds, "lon")
+            if construct_grid:
+                self.grid = self._grid_from_xarray(ds)
+        else:
+            self.lat = grid.activearrlat
+            self.lon = grid.activearrlon
+            self.grid = grid
 
     def _metadata_from_xarray(self, ds: xr.Dataset) -> Tuple[dict, dict]:
         global_attrs = dict(ds.attrs)
@@ -132,9 +151,7 @@ class XarrayReaderBase:
     def _grid_from_xarray(self, ds: xr.Dataset) -> CellGrid:
 
         # if using regular lat-lon grid, we can use gridfromdims
-        self.lat = self._get_coord(ds, "lat")
-        self.lon = self._get_coord(ds, "lon")
-        if self._has_regular_grid:
+        if self._has_2d_grid:
             if self.curvilinear:
                 grid = BasicGrid(
                     self.lon.values.ravel(), self.lat.values.ravel()
@@ -145,7 +162,7 @@ class XarrayReaderBase:
             grid = BasicGrid(self.lon, self.lat)
 
         if hasattr(self, "landmask") and self.landmask is not None:
-            if self._has_regular_grid:
+            if self._has_2d_grid:
                 landmask = self.landmask.stack(
                     dimensions={"loc": (self.latname, self.lonname)}
                 )
@@ -177,7 +194,9 @@ class XarrayReaderBase:
 
         return grid
 
-    def _get_coord(self, ds: xr.Dataset, coordname: str) -> xr.DataArray:
+    def _coord_from_xarray(
+        self, ds: xr.Dataset, coordname: str
+    ) -> xr.DataArray:
         # coordname must be either "lat" or "lon", independent of what's in the
         # dataset, this only chooses attributes from this class based on the
         # choice
@@ -227,7 +246,7 @@ class XarrayReaderBase:
     def _select_levels(self, ds):
         if self.level is not None:
             for varname in self.level:
-                variable_levels = self._select_levels_iteratively(
+                variable_levels = self.__class__._select_levels_iteratively(
                     varname, ds[varname], self.level[varname]
                 )
                 if len(variable_levels) == 1:
@@ -238,10 +257,18 @@ class XarrayReaderBase:
                         ds[name] = arr
         return ds
 
-    def _select_levels_iteratively(self, name, arr, leveldict):
+    @staticmethod
+    def _select_levels_iteratively(name, arr, leveldict):
         # input list: list of (name, arr, leveldict)
         output_list = [(name, arr)]
         for levelname, idx in leveldict.items():
+            if levelname not in arr.dims:
+                warnings.warn(
+                    f"Selection from level {levelname} requested, but"
+                    f" {levelname} is not an array dimension. Existing"
+                    f" dimensions are {arr.dims}."
+                )
+                continue
             if not isinstance(idx, list):
                 idx = [idx]
             tmp_list = []
@@ -254,7 +281,7 @@ class XarrayReaderBase:
         return output_list
 
 
-class XarrayImageReaderMixin:
+class XarrayImageReaderBase(XarrayReaderBase):
     """
     Base class for image readers backed by xarray objects (multiple single
     images or single stack of multiple images).
@@ -303,8 +330,8 @@ class XarrayImageReaderMixin:
         Returns
         -------
         timestamps : array_like
-            Array of datetime.datetime timestamps of available images in the date
-            range.
+            Array of datetime.datetime timestamps of available images in the
+            date range.
         """
         # evaluate the input to obtain the correct format
         start, end = self._validate_start_end(start, end)
@@ -319,9 +346,23 @@ class XarrayImageReaderMixin:
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
-    ) -> xr.Dataset:  # pragma: no cover
+    ) -> Dict[
+        str, Union[np.ndarray, dask.array.core.Array]
+    ]:  # pragma: no cover
         """
-        Returns a single image for the given timestamp
+        Reads multiple images of a dataset as a numpy/dask array.
+
+        Parameters
+        ----------
+        start, end : datetime.datetime
+
+        Returns
+        -------
+        block : np.ndarray or dask.array.core.Array
+            Block of data (data cube) with dimension order:
+            - time, lat, lon for data on a regular 2D grid
+            - time, y, x for data on a curvilinear 2D grid
+            - time, loc for unstructured data
         """
         ...
 
@@ -352,50 +393,46 @@ class XarrayImageReaderMixin:
             ``self.latname`` and ``self.lonname`` as dimensions.
         """
         start, end = self._validate_start_end(start, end)
-        block = self._read_block(start, end)
-        # we might need to apply the landmask, this is applied before renaming
-        # the coordinates, because it is in the original coordinates
+        times = self.tstamps_for_daterange(start, end)
+        block_dict = self._read_block(start, end)
+
+        # we might need to apply the landmask
         if self.landmask is not None and _apply_landmask_bbox:
-            block = block.where(self.landmask)
+            mask = np.broadcast_to(
+                ~self.landmask.values, [len(times)] + list(self.landmask.shape)
+            )
+            for var in block_dict:
+                if isinstance(block_dict[var], np.ndarray):
+                    masked_array = np.ma.masked_array
+                elif isinstance(block_dict[var], da.core.Array):
+                    masked_array = da.ma.masked_array
+                else:
+                    raise ReaderError("Unknown array type in read_block.")
+                block_dict[var] = masked_array(block_dict[var], mask=mask)
 
         # Now we have to set the coordinates/dimensions correctly.  This works
         # differently depending on how the original data is structured:
-        # 1) regular lon-lat grid where latdim=latname, e.g. latname="lat", and
-        #    "lat" is a 1D array
-        #    - How to catch: latdim/londim is None
-        #    - What to do: nothing
-        # 2) regular lon-lat grid where latdim is not the same as the latitude
-        #    vector, e.g. latdim="north_south", latname="lat", where "lat" is a
-        #    1D array
-        #    - How to catch: latdim/londim and latname/londim are set, locdim
-        #      is None, self.curvilinear is False
-        #    - What to do: replace latdim with latname (i.e. rename and reset
-        #      values)
-        # 3) curvilinear grid: for example latdim="y", latname="lat", where
-        #    "lat" is a 2D array
-        #    - How to catch: latdim/londim and latname/londim are set, locdim
-        #      is None, self.curvilinear is True
-        #    - What to do: nothing, coordinates are already here and have the
-        #      right name and dimensions
-        # 4) unstructured grid: for example, locdim="loc", latname="lat",
-        #    lonname="lon"
-        #    - How to catch: self.locdim is not None
-        #    - What to do: assign flat lat and lon arrays as coordinates
-        if not self.curvilinear:
-            if self.latdim is not None:
-                block = block.rename(
-                    {self.latdim: self.latname}
-                ).assign_coords({self.latname: self.lat.values})
-            if self.londim is not None:
-                block = block.rename(
-                    {self.londim: self.lonname}
-                ).assign_coords({self.lonname: self.lon.values})
-        if self.locdim is not None:
-            # add latitude and longitude as coordinates
-            # if locdim is not None, latname and lonname have to be set
-            block = block.assign_coords(
-                {self.latname: self.lat, self.lonname: self.lon}
-            )
+        coords = {}
+        coords[self.timename] = times
+        if self._has_regular_grid:
+            # we can simply wrap the data with time, lat, and lon
+            coords[self.latname] = self.lat
+            coords[self.lonname] = self.lon
+            dims = (self.timename, self.latname, self.lonname)
+        elif self.curvilinear:
+            coords[self.latname] = ([self.latdim, self.londim], self.lat)
+            coords[self.lonname] = ([self.latdim, self.londim], self.lon)
+            dims = (self.timename, self.latdim, self.londim)
+        else:  # unstructured grid
+            coords[self.latname] = (self.locdim, self.lat.data)
+            coords[self.lonname] = (self.locdim, self.lon.data)
+            dims = (self.timename, self.locdim)
+
+        arrays = {
+            name: (dims, data, self.array_attrs[name])
+            for name, data in block_dict.items()
+        }
+        block = xr.Dataset(arrays, coords=coords, attrs=self.global_attrs)
 
         # bounding box is applied after assigning the coordinates
         if self.bbox is not None and _apply_landmask_bbox:
@@ -446,7 +483,7 @@ class XarrayImageReaderMixin:
         img = self.read_block(
             timestamp, timestamp, _apply_landmask_bbox=False
         ).isel({self.timename: 0})
-        if self._has_regular_grid:
+        if self._has_2d_grid:
             latname = self.latname if not self.curvilinear else self.latdim
             lonname = self.lonname if not self.curvilinear else self.londim
             img = img.stack(dimensions={"loc": (latname, lonname)})
@@ -460,7 +497,7 @@ class XarrayImageReaderMixin:
         )
 
 
-class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
+class DirectoryImageReader(XarrayImageReaderBase):
     r"""
     Image reader for a directory containing netcdf files.
 
@@ -500,6 +537,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         for day, %H for hours, %M for minutes, ...).
         If such a simple pattern does not work for you, you can additionally
         specify `time_regex_pattern` (see below).
+        `fmt` should only be used if the files only contain a single image.
     pattern : str, optional
         Glob pattern to find all files to use, default is "*.nc".
     time_regex_pattern : str, optional
@@ -550,8 +588,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         Default is False.
     timename : str, optional
         The name of the time coordinate, default is "time".
-    daily_average: bool, optional
-        If True, average the sub-daily inputs to obtain daily data.
+    average: str, optional
+        If specified, average multiple images. Currently only "daily" is
+        implemented. Default is None.
     landmask : xr.DataArray or str, optional
         A land mask to be applied to reduce storage size. This can either be a
         xr.DataArray of the same shape as the dataset images with ``False`` at
@@ -575,6 +614,9 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     discard_attrs : bool, optional
         Whether to discard the attributes of the input netCDF files (reduced
         data size).
+    fill_value : float, optional
+        Fill values to be masked, e.g. -9999 as a common convention.
+    grid : BasicGrid or CellGrid, optional
     """
 
     def __init__(
@@ -593,7 +635,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         locdim: str = None,
         lat: tuple = None,
         lon: tuple = None,
-        daily_average: bool = False,
+        average: str = None,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
@@ -602,21 +644,31 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         cache: bool = False,
         curvilinear: bool = False,
         discard_attrs: bool = False,
+        transpose: tuple = None,
+        use_tqdm: bool = False,
+        skip_missing: bool = False,
+        fill_value: float = None,
+        construct_grid: bool = True,
+        grid: BasicGrid = None,
     ):
+        if use_dask:
+            self.chunks = -1
+        else:
+            self.chunks = None
+        self.cache = cache
+        self.average = average
+        self.transpose = transpose
+        self.use_tqdm = use_tqdm
+        self.fill_value = fill_value
 
         # first, we walk over the whole directory subtree and find any files
         # that match our pattern
         directory = Path(directory)
         filepaths = self._get_filepaths(directory, pattern)
         ds = self._get_example_dataset(filepaths)
-
-        if use_dask:
-            self.chunks = -1
-        else:
-            self.chunks = None
-        self.cache = cache
-
-        self.daily_average = daily_average
+        varnames, rename, level = self._get_varnames_rename_level(
+            ds, varnames, rename, level, skip_missing
+        )
 
         # now we can call the parent constructor using the dataset from the
         # first file
@@ -637,79 +689,33 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             cellsize=cellsize,
             curvilinear=curvilinear,
             rename=rename,
+            construct_grid=construct_grid,
+            grid=grid,
         )
 
-        # if possible, deduce the timestamps from the filenames and create a
-        # dictionary mapping timestamps to file paths
-        self.filepaths = {}
-        if fmt is not None:
-            if time_regex_pattern is not None:
-                time_pattern = re.compile(time_regex_pattern)
-            for fname, path in filepaths.items():
-                if time_regex_pattern is not None:
-                    match = time_pattern.findall(fname)
-                    if not match:  # pragma: no cover
-                        raise ReaderError(
-                            f"Pattern {time_regex_pattern} did not match "
-                            f"{fname}"
-                        )
-                    timestring = match[0]
-                else:
-                    timestring = fname
-                tstamp = datetime.datetime.strptime(timestring, fmt)
-                self.filepaths[tstamp] = path
-        else:
-            for _, path in filepaths.items():
-                ds = xr.open_dataset(path)
-                if timename not in ds.indexes:  # pragma: no cover
-                    raise ReaderError(
-                        f"Time dimension {timename} does not exist in "
-                        f"{str(path)}"
-                    )
-                time = ds.indexes[timename]
-                if len(time) != 1:  # pragma: no cover
-                    raise ReaderError(
-                        f"Expected only a single timestamp, found {str(time)} "
-                        f" in {str(path)}"
-                    )
-                tstamp = time[0].to_pydatetime()
-                self.filepaths[tstamp] = path
+        # file_tstamp_map maps a single file to 1 or many timestamps available
+        # in this file
+        self._file_tstamp_map = self._create_filepath_tstamp_map(
+            fmt, time_regex_pattern, filepaths
+        )
 
-        if self.daily_average:
-            self.nested_timestamps = self._organize_subdaily()
-        # sort the timestamps according to date, because we might have to
-        # return them sorted
-        self._timestamps = sorted(list(self.filepaths))
+        # tstamp_file_map maps each timestamp to the file where it can be found
+        self.tstamp_file_map = {}
+        for fname, tstamps in self._file_tstamp_map.items():
+            for t in tstamps:
+                self.tstamp_file_map[t] = fname
+        self._available_timestamps = sorted(list(self.tstamp_file_map))
+
+        # output_tstamp_map maps a single output timestamp to 1 or many
+        # timestamps available in this directory/dataset
+        if self.average is not None:
+            self._output_tstamp_map = self._create_output_tstamp_map()
+            self._timestamps = sorted(list(self._output_tstamp_map))
+        else:
+            self._timestamps = self._available_timestamps
 
         if discard_attrs:
             self.discard_attrs()
-
-    def discard_attrs(self):
-        self.global_attrs = {}
-        self.array_attrs = {v: {} for v in self.varnames}
-
-    @property
-    def timestamps(self):
-        if self.daily_average:
-            return list(self.nested_timestamps.keys())
-        else:
-            return self._timestamps
-
-    def _organize_subdaily(self):
-        # maps sub-daily timestamps to the respective daily level
-        nested = dict()
-        for tstamp in sorted(self.filepaths):
-            path = self.filepaths[tstamp]
-            # convert time to 00:00:00
-            date = tstamp.date()
-            daily_date = datetime.datetime(date.year, date.month, date.day)
-            # map sub-daily timestamps to the relative timestamp at midnight
-            if daily_date in nested.keys():
-                nested[daily_date].append(tstamp)
-            else:
-                nested[daily_date] = [tstamp]
-
-        return nested
 
     def _get_filepaths(self, directory, pattern):
         filepaths = {}
@@ -729,85 +735,236 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     def _get_example_dataset(self, filepaths):
         # We need to read the first file so that the parent constructor can
         # deduce the grid from it.
-        ds = xr.open_dataset(next(iter(filepaths.values())))
+        fname = next(iter(filepaths.values()))
+        logging.info(f"Opening {str(fname)} to infer metadata.")
+        ds = self._open_dataset(fname)
         return ds
 
-    def _read_file(self, timestamp):
-        # reads file(s), does renaming, and selecting of levels
-        # average sub-daily images if selected
-        if self.daily_average:
-            sub_dss = []
-            if (
-                timestamp not in self.nested_timestamps.keys()
-                and timestamp in self.filepaths.keys()
-            ):
-                raise ReaderError(
-                    "Reading individual sub-daily timestamps is not supported"
-                    " when 'daily_average' is set to 'True'. Set time to"
-                    " 00:00:00 to access the daily averaged value."
-                )
-            elif (
-                timestamp not in self.nested_timestamps.keys()
-                and timestamp not in self.filepaths.keys()
-            ):
-                raise ReaderError(
-                    f"The provided timestamp {timestamp} is not available in"
-                    " the dataset!"
-                )
+    def _open_dataset(self, fname):
+        ds = xr.open_dataset(fname, chunks=self.chunks, cache=self.cache)
+        if self.fill_value is not None:
+            ds = ds.where(ds != self.fill_value)
+        return ds
 
-            # collect all sub-daily timestamp datasets and average
-            for sub_timestamp in self.nested_timestamps[timestamp]:
-                sub_ds = xr.open_dataset(
-                    self.filepaths[sub_timestamp],
-                    chunks=self.chunks,
-                    cache=self.cache,
-                )
-                sub_dss.append(sub_ds)
-            ds = xr.concat(
-                sub_dss,
-                dim=self.timename,
-                coords="minimal",
-                join="override",
-                combine_attrs="override",
-                compat="override",
-            ).mean(dim=self.timename)
+    def _get_varnames_rename_level(
+        self, ds, varnames, rename, level, skip_missing
+    ):
+        if skip_missing:
+            # To skip missing variables, we have to remove the variable names
+            # from `varnames`, `rename`, and `level`.
+            # Since `varnames` contains the final variable names, we first have
+            # to create a mapping from original on file variable names to
+            # variable names in `varnames`.
+            # For example, if we want to read multiple soil moisture
+            # levels,  runoff, and LAI from a LIS NOAHMP output file that does
+            # not contain LAI, we would maybe have something like this:
+            #
+            # level={"SoilMoist_tavg": [0, 1]}
+            # rename={"SoilMoist_tavg_0": "SSM", "SoilMoist_tavg_1": "RZSM"",
+            #         "Qs_tavg": "RUNOFF", "LAI_tavg": "LAI"}
+            # varnames=["SSM", "RZSM", "RUNOFF", "LAI"]
+            #
+            # We then first have to create a dictionary like this:
+            #
+            # namemapl1 = {"SoilMoist_tavg": ["SoilMoist_tavg_0",
+            #                               "SoilMoist_tavg_1"],
+            #              "Qs_tavg": ["Qs_tavg"]}
+            #
+            # (note the missing LAI, since we derive the map from the variables
+            # in the file)
 
+            if level is None:
+                namemapl1 = {var: [var] for var in ds.data_vars}
+            else:
+                namemapl1 = {}
+                for var in ds.data_vars:
+                    if var in level:
+                        levelvars = self.__class__._select_levels_iteratively(
+                            var, ds[var], level[var]
+                        )
+                        namemapl1[var] = [name for name, _ in levelvars]
+                    else:
+                        namemapl1[var] = [var]
+
+                # Now we can already check which of the keys in namemapl1 are
+                # not available in the files and remove them from `level`.
+                new_level = level.copy()
+                for var in level:
+                    if var not in namemapl1:
+                        del new_level[var]
+                level = new_level
+
+            # In the next step we can apply the renaming:
+            #
+            # namemapl2 = {"SoilMoist_tavg": ["SSM", "RZSM"],
+            #              "Qs_tavg": ["RUNOFF"]}
+            #
+            if rename is None:
+                namemapl2 = namemapl1.copy()
+            else:
+                namemapl2 = {}
+                for file_var in namemapl1:
+                    namemapl2[file_var] = [
+                        rename[orig_var] if orig_var in rename else orig_var
+                        for orig_var in namemapl1[file_var]
+                    ]
+                # Now we can remove the entries in rename that do not have a
+                # corresponding entry in namemapl1
+                new_rename = rename.copy()
+                l1names = []
+                for file_var in namemapl1:
+                    l1names += namemapl1[file_var]
+                for l1name in rename:
+                    if l1name not in l1names:
+                        del new_rename[l1name]
+                rename = new_rename
+
+            # Now we can finally remove the non-existing varnames
+            l2names = []
+            for file_var in namemapl2:
+                l2names += namemapl2[file_var]
+            new_varnames = []
+            for l2name in varnames:
+                if l2name in l2names:
+                    new_varnames.append(l2name)
+                else:
+                    warnings.warn(
+                        f"Skipping variable {l2name} because it does not exist"
+                    )
+            varnames = new_varnames
+        return varnames, rename, level
+
+    def _create_filepath_tstamp_map(self, fmt, time_regex_pattern, filepaths):
+        filepath_tstamp_map = {}
+        if fmt is not None:
+            # the fastest way is to deduce the timestamps from the list
+            # of filenames
+            if time_regex_pattern is not None:
+                time_pattern = re.compile(time_regex_pattern)
+            for fname, path in filepaths.items():
+                if time_regex_pattern is not None:
+                    match = time_pattern.findall(fname)
+                    if not match:  # pragma: no cover
+                        raise ReaderError(
+                            f"Pattern {time_regex_pattern} did not match "
+                            f"{fname}"
+                        )
+                    timestring = match[0]
+                else:
+                    timestring = fname
+                tstamp = datetime.datetime.strptime(timestring, fmt)
+                filepath_tstamp_map[path] = [tstamp]
         else:
-            ds = xr.open_dataset(
-                self.filepaths[timestamp], chunks=self.chunks, cache=self.cache
+            logging.info(
+                "Opening all files to get timestamps. This might take a while"
             )
-        ds = self._select_levels(ds)
-        if self.rename is not None:
-            ds = ds.rename(self.rename)
-        return ds[self.varnames]
+            iterator = filepaths.items()
+            if self.use_tqdm:
+                iterator = tqdm(iterator)
+            for _, path in iterator:
+                ds = xr.open_dataset(path, chunks=-1)
+                if self.timename not in ds.indexes:  # pragma: no cover
+                    raise ReaderError(
+                        f"Time dimension {self.timename} does not exist in "
+                        f"{str(path)}"
+                    )
+                time = ds.indexes[self.timename]
+                tstamps = [t.to_pydatetime() for t in time]
+                filepath_tstamp_map[path] = tstamps
+        return filepath_tstamp_map
+
+    def _create_output_tstamp_map(self):
+        output_tstamp_map = {}
+        for tstamp in self._available_timestamps:
+            output_tstamp = self._calculate_averaging_timestamp(tstamp)
+            if output_tstamp in output_tstamp_map:
+                output_tstamp_map[output_tstamp].append(tstamp)
+            else:
+                output_tstamp_map[output_tstamp] = [tstamp]
+        return output_tstamp_map
+
+    def _calculate_averaging_timestamp(self, tstamp):
+        if self.average == "daily":
+            date = tstamp.date()
+            return datetime.datetime(date.year, date.month, date.day)
+        else:
+            raise NotImplementedError("only average='daily' is implemented")
+
+    def discard_attrs(self):
+        self.global_attrs = {}
+        self.array_attrs = {v: {} for v in self.varnames}
 
     def _read_block(
-        self, start: datetime.datetime, end: datetime.datetime
-    ) -> xr.Dataset:
-        # Here we just read image file by image file within the given range and
-        # concatenate them to a single dataset along the time dimension.
-        timestamps = self.tstamps_for_daterange(start, end)
+        self, start, end
+    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:
 
-        imgs = []
-        for tstamp in timestamps:
-            imgs.append(self._read_file(tstamp))
+        # reading a block:
+        # - find output timestamps in given range
+        # - if output timestamps == available timestamps
+        #   - for required each file, read the required arrays and stack the
+        #     stacks onto each other
+        # - if averaging has to be done:
+        #   - for each output timestamp:
+        #     - do same procedure as above, then take the mean
+        #   - stack all images
+        times = self.tstamps_for_daterange(start, end)
+        if self.average is None:
+            block_dict = self._read_all_files(times, self.use_tqdm)
+        else:
+            # If we have to average multiple images to a single image, we will
+            # read image by image
+            block_dict = {varname: [] for varname in self.varnames}
+            if self.use_tqdm:
+                times = tqdm(times)
+            for tstamp in times:
+                # read all sub-images that have to be averaged later on
+                times_to_read = self._output_tstamp_map[tstamp]
+                tmp_block_dict = self._read_all_files(times_to_read, False)
+                for varname in self.varnames:
+                    block_dict[varname].append(
+                        np.mean(tmp_block_dict[varname], axis=0)
+                    )
+            # now we just have to convert the lists of arrays to array stacks
+            for varname in self.varnames:
+                block_dict[varname] = np.stack(block_dict[varname], axis=0)
+        return block_dict
 
-        block = xr.concat(
-            imgs,
-            dim=self.timename,
-            coords="minimal",
-            join="override",
-            combine_attrs="override",
-            compat="override",
-        ).assign_coords({self.timename: timestamps})
+    def _read_all_files(self, times, use_tqdm):
+        # first we need to find all files that we have to visit, and remember
+        # the timestamps that we need from this file
+        file_tstamp_map = {}
+        for tstamp in times:
+            fname = self.tstamp_file_map[tstamp]
+            if fname in file_tstamp_map:
+                file_tstamp_map[fname].append(tstamp)
+            else:
+                file_tstamp_map[fname] = [tstamp]
 
-        for varname in self.array_attrs:
-            block[varname].attrs = self.array_attrs[varname]
-        block.attrs = self.global_attrs
-        return block
+        # now we can open each file and extract the timestamps we need
+        block_dict = {varname: [] for varname in self.varnames}
+        iterator = file_tstamp_map.items()
+        if use_tqdm:
+            iterator = tqdm(iterator)
+        for fname, tstamps in iterator:
+            ds = self._open_dataset(fname)
+            if self.transpose is not None:
+                ds = ds.transpose(*self.transpose)
+            ds = self._select_levels(ds)
+            if self.rename is not None:
+                ds = ds.rename(self.rename)
+            for varname in self.varnames:
+                arr = ds[varname]
+                if self.timename in arr.dims:
+                    arr = arr.sel({self.timename: tstamps})
+                    block_dict[varname].append(arr.data)
+                else:
+                    block_dict[varname].append(arr.data[np.newaxis, ...])
+        for varname in self.varnames:
+            block_dict[varname] = np.vstack(block_dict[varname])
+        return block_dict
 
 
-class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
+class XarrayImageStackReader(XarrayImageReaderBase):
     """
     Image reader that wraps a xarray.Dataset.
 
@@ -937,7 +1094,8 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
         self, start: datetime.datetime, end: datetime.datetime
     ) -> xr.Dataset:
         block = self.data.sel({self.timename: slice(start, end)})
-        return block
+        block_dict = {var: block[var].data for var in self.varnames}
+        return block_dict
 
 
 class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
@@ -1110,10 +1268,10 @@ class XarrayTSReader(XarrayReaderBase):
         img_dims = ds[varnames[0]].dims
         dims = {}
         for dim in img_dims:
-            if dim in [_latdim, _londim, timename]:
+            if dim in [_latdim, _londim, locdim, timename]:
                 dims[dim] = ds_dims[dim]
         shape = tuple(dims.values())
-        chunks = infer_chunks(shape, 100, np.float32)
+        chunks = infer_chunksizes(shape, 100, np.float32)
         ds = ds.chunk(dict(zip(list(dims), chunks)))
 
         if list(dims)[-1] != timename:
@@ -1136,7 +1294,7 @@ class XarrayTSReader(XarrayReaderBase):
             cellsize=cellsize,
         )
 
-        if self._has_regular_grid:
+        if self._has_2d_grid:
             # we have to reshape the data
             latdim = self.latdim if self.latdim is not None else self.latname
             londim = self.londim if self.londim is not None else self.lonname
@@ -1163,13 +1321,13 @@ class XarrayTSReader(XarrayReaderBase):
         """
         if len(args) == 1:
             gpi = args[0]
-            if self._has_regular_grid:
+            if self._has_2d_grid:
                 lon, lat = self.grid.gpi2lonlat(gpi)
 
         elif len(args) == 2:
             lon = args[0]
             lat = args[1]
-            if not self._has_regular_grid:
+            if not self._has_2d_grid:
                 gpi = self.grid.find_nearest_gpi(lon, lat)[0]
                 if not isinstance(gpi, np.integer):  # pragma: no cover
                     raise ValueError(
@@ -1180,7 +1338,7 @@ class XarrayTSReader(XarrayReaderBase):
                 f"args must have length 1 or 2, but has length {len(args)}"
             )
 
-        if self._has_regular_grid:
+        if self._has_2d_grid:
             data = self.orig_data.sel(lat=lat, lon=lon)
         else:
             data = self.data[{self.locdim: gpi}]

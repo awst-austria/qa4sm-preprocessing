@@ -4,19 +4,16 @@ import dask.array as da
 from dask.distributed import Client
 import datetime
 import logging
-import math
 from multiprocessing.pool import ThreadPool
 import numpy as np
 from pathlib import Path
 from tqdm.auto import tqdm
-from typing import Union, TypeVar, Tuple
+from typing import Union, TypeVar
 import xarray as xr
 import shutil
-import warnings
 import zarr
 
-
-from .utils import infer_chunks
+from .utils import infer_chunksizes
 from .readers import DirectoryImageReader
 
 
@@ -29,15 +26,15 @@ def write_transposed_dataset(
     start: datetime.datetime = None,
     end: datetime.datetime = None,
     chunks: dict = None,
-    memory: float = 2,
-    n_threads: int = 4,
+    memory: float = 5,
     zlib: bool = True,
     complevel: int = 4,
-    distributed: Union[bool, Client] = False,
-    use_dask: bool = True,
+    distributed=False,
+    n_threads: int = 1,
+    stepsize: int = None,
 ):
     """
-    Creates a stacked and transposed netCDF file from a given reader.
+    Creates a stacked and transposed netCDF/zarr file from a given reader.
 
     WARNING: very experimental!
 
@@ -55,12 +52,10 @@ def write_transposed_dataset(
     chunks : dictionary, optional
         The chunk sizes that are used for the transposed file. If none are
         given, chunks with a size of 1MB are used for netCDF, and chunks with a
-        size of 50MB are used for zarr output.
+        size of 100MB are used for zarr output.
     memory : float, optional
-        The amount of memory to be used for buffering in GB. Default is 2.
+        The amount of memory to be used for buffering in GB. Default is 5.
         Higher is faster.
-    n_threads : int, optional
-        The amount of threads to use. Default is 4.
     zlib : bool, optional
         Whether to use compression when storing the files. Reduces file size,
         but strongly increases write time, and maybe also access time. Default
@@ -71,14 +66,11 @@ def write_transposed_dataset(
     distributed : bool or Client, optional
         Whether to use the local or the distributed dask scheduler. If a client
         for a distributed scheduler is used, this is used instead.
-    use_dask : bool, optional
-        Whether to use dask for the transposing. Default is True, but sometimes
-        (especially with large datasets) this fails. If set to False, the data
-        is written to an intermediate zarr store.
+    n_threads : int, optional
+        The amount of threads to use for the final step of the
+        transposing. Default is 2. Only relevant if `distributed` is not a dask
+        client instance.
     """
-    dask_config = {
-        "array.slicing.split_large_chunks": False,
-    }
     args = (reader, outfname)
     kwargs = {
         "start": start,
@@ -87,17 +79,32 @@ def write_transposed_dataset(
         "zlib": zlib,
         "complevel": complevel,
         "chunks": chunks,
+        "stepsize": stepsize,
     }
-    if not use_dask:
-        _transpose_no_dask(*args, **kwargs)
-    elif isinstance(distributed, Client) or not distributed:
+
+    dask_config = {
+        "array.slicing.split_large_chunks": False,
+    }
+    if isinstance(distributed, Client) or not distributed:
         if not distributed:
+            logging.info(
+                "write_transposed_dataset: using thread pool with "
+                f" {n_threads} threads"
+            )
             dask_config.update(
-                {"scheduler": "threads", "pool": ThreadPool(n_threads)}
+                {
+                    "scheduler": "threads",
+                    "pool": ThreadPool(n_threads),
+                }
+            )
+        else:
+            logging.info(
+                "write_transposed_dataset: using distributed scheduler"
+                f" available at {distributed.dashboard_link}"
             )
         with dask.config.set(**dask_config):
             _transpose(*args, **kwargs)
-    elif distributed:
+    else:
         with dask.config.set(**dask_config), Client(
             n_workers=1,
             threads_per_worker=n_threads,
@@ -107,301 +114,170 @@ def write_transposed_dataset(
             _transpose(*args, **kwargs)
 
 
-def _get_intermediate_chunks(array, chunks, new_last_dim, zarr_output, memory):
-    """
-    Calculates chunk sizes for the given array for the intermediate output
-    files.
-
-    Parameters
-    ----------
-    array : xr.DataArray
-        Array to rechunk and transpose
-    chunks : dict or None
-        Chunks passed to write_transposed_dataset, None if none were given.
-    new_last_dim : str
-        Name of the new last dimension, normally "time".
-    zarr_output : bool
-        Whether the final file will be a zarr file (True) or a netCDf (False).
-    memory : float
-        The amount of memory to be used for buffering in GB.
-
-    Returns
-    -------
-    tmp_chunks : dict
-        Chunks to be used for rechunking the array to a temporary file. The
-        order of keys corresponds to the order of dimensions in the transposed
-        array.
-    """
-    dtype = array.dtype
-    dims = dict(zip(array.dims, array.shape))
-    transposed_shape = [
-        length for dim, length in dims.items() if dim != new_last_dim
-    ]
-    transposed_shape.append(dims[new_last_dim])
-
-    # If the chunks argument was not given, we have to infer the spatial
-    # and temporal chunks for the intermediate file.
-    # The spatial chunks will be set such that for a continuous time
-    # dimension the chunk size is still reasonable.
-    if chunks is None:
-        if zarr_output:
-            chunksizes = infer_chunks(transposed_shape, 100, dtype)[:-1]
-        else:
-            chunksizes = infer_chunks(transposed_shape, 1, dtype)[:-1]
-        chunks = dict(
-            zip([dim for dim in dims if dim != new_last_dim], chunksizes)
-        )
-        chunks[new_last_dim] = -1
-    else:
-        chunks = copy.copy(chunks)
-    tmp_chunks = {dim: chunks[dim] for dim in dims if dim != new_last_dim}
-
-    # figure out temporary chunk sizes based on image size and available memory
-    size = dtype.itemsize
-    chunksizes = [size if size != -1 else dims[dim] for dim, size in chunks.items()]
-    chunksize_MB = np.prod(chunksizes) * size / 1024 ** 2
-    img_shape = transposed_shape[:-1]
-    len_time = transposed_shape[-1]
-    imagesize_GB = np.prod(img_shape) * size / 1024 ** 3
-    # we need to divide by two, because we need intermediate storage for
-    # the transposing
-    stepsize = int(math.floor(memory / imagesize_GB)) // 2
-    stepsize = min(stepsize, len_time)
-
-    tmp_chunks[new_last_dim] = stepsize
-    tmp_chunks_str = str(tuple(tmp_chunks.values()))
-    logging.info(
-        f"write_transposed_dataset: Creating chunks {tmp_chunks_str}"
-        f" with chunksize {chunksize_MB:.2f} MB"
-    )
-    return tmp_chunks
-
-
 def _transpose(
     reader: Reader,
     outfname: Union[Path, str],
     start: datetime.datetime = None,
     end: datetime.datetime = None,
     chunks: dict = None,
-    memory: float = 2,
+    memory: float = 5,
     zlib: bool = True,
     complevel: int = 4,
+    stepsize: int = None,
 ):
-    zarr_output = str(outfname).endswith(".zarr")
-    new_last_dim = reader.timename
-
-    if isinstance(reader, DirectoryImageReader) and reader.chunks is None:
-        logging.info(
-            "You are using DirectoryImageReader without dask. If you run into"
-            " memory issues or have large datasets to transpose, consider"
-            " setting use_dask=True in the constructor of DirectoryImageReader."
-        )
-
-    ds = reader.read_block(start, end)
-
-    # We process each variable separately and store them as intermediately
-    # chunked temporary files. The chunk size in time dimension is inferred
-    # from the given memory.
-    variable_chunks = {}
-    variable_intermediate_fnames = {}
-    for var in reader.varnames:
-
-        tmp_outfname = str(outfname) + f".{var}.zarr"
-        variable_intermediate_fnames[var] = tmp_outfname
-        if Path(tmp_outfname).exists():
-            logging.info(
-                "Skipping generating intermediate file {tmp_outfname}"
-                " because it exists"
-            )
-            continue
-
-        tmp_chunks = _get_intermediate_chunks(
-            ds[var], chunks, new_last_dim, zarr_output, memory
-        )
-
-        # make sure that the time dimension will be continuous in the final
-        # output
-        chunks = copy.copy(tmp_chunks)
-        chunks[new_last_dim] = len(ds[var].time)
-        variable_chunks[var] = chunks
-
-        # now we can rechunk and transpose using xarray
-        rechunked_transposed = ds[var].chunk(tmp_chunks).transpose(
-            ..., new_last_dim
-        )
-        rechunked_transposed.to_dataset().to_zarr(
-            tmp_outfname, consolidated=True
-        )
-
-    # Now we have to reassemble all variables to a single dataset and write the
-    # final chunks
-    variable_ds = []
-    variable_chunksizes = {}
-    for var in reader.varnames:
-        ds = xr.open_zarr(variable_intermediate_fnames[var], consolidated=True)
-        variable_ds.append(ds)
-
-        # for the encoding variable below we need the chunks as tuple in the
-        # right order, it's easier to get this here were we have easy access to
-        # the transposed DataArray
-        transposed_dims = ds[var].dims
-        variable_chunksizes[var] = tuple(
-            chunks[dim] for dim in transposed_dims
-        )
-
-    ds = xr.merge(
-        variable_ds,
-        compat="override",
-        join="override",
-        combine_attrs="override",
-    )
-    ds.attrs.update(reader.global_attrs)
-    encoding = {
-        var: {
-            "chunksizes": variable_chunksizes[var],
-            "zlib": zlib,
-            "complevel": complevel,
-        }
-        for var in reader.varnames
+    # there are some reader settings that we need to set to different values,
+    # they will be reset later
+    readersettings = {
+        "cache": False,  # don't hang onto old files
+        "chunks": None,  # we don't need dask
+        "use_tqdm": False,  # we have our own progressbar
     }
 
-    if not zarr_output:
-        ds.to_netcdf(outfname, encoding=encoding)
-    else:
-        for var in reader.varnames:
-            del ds[var].encoding["chunks"]
-            del ds[var].encoding["preferred_chunks"]
-            ds[var] = ds[var].chunk(variable_chunksizes[var])
-        ds.to_zarr(outfname, mode="w", consolidated=True)
-
-    for var in reader.varnames:
-        shutil.rmtree(variable_intermediate_fnames[var])
-    logging.info("write_transposed_dataset: Finished writing transposed file.")
-
-
-def _transpose_no_dask(
-    reader: Reader,
-    outfname: Union[Path, str],
-    start: datetime.datetime = None,
-    end: datetime.datetime = None,
-    chunks: Tuple = None,
-    memory: float = 2,
-    zlib: bool = True,
-    complevel: int = 4,
-):
-    warnings.warn(
-        "This is an experimental function and not yet ready for public use!"
-    )
-    zarr_output = str(outfname).endswith(".zarr")
-    new_last_dim = reader.timename
+    outfname = str(outfname)
     timestamps = reader.tstamps_for_daterange(start, end)
 
-    variable_fnames = {}
-    variable_dims = {}
-    for varname in reader.varnames:
+    # figure out coordinates and dimensions based on test image
+    testarr = reader.read_block(timestamps[0], timestamps[0])
+    coords = dict(testarr.coords)
+    coords[reader.timename] = timestamps
+    dims = dict(testarr.dims)
+    del dims[reader.timename]
+    dims[reader.timename] = len(timestamps)
+    new_dimsizes = tuple(size for size in dims.values())
 
-        tmp_outfname = str(outfname) + f".{varname}.zarr"
-        variable_fnames[varname] = tmp_outfname
+    # Now we have to find out how big the chunks should be. For this, we first
+    # have to calculate the image size for the variable with the largest dtype,
+    # because this will limit the size
+    maxdtypesize = 0
+    for var in reader.varnames:
+        maxdtypesize = max(maxdtypesize, testarr[var].dtype.itemsize)
+    imagesize = np.prod(new_dimsizes[:-1]) * maxdtypesize / 1024**3  # in GB
+    if stepsize is None:
+        # The available memory governs how many images we can read at once:
+        # mem = imagesize * nvar * 3 * nsteps
+        # The factor 3 is because we have to read the data and transpose it,
+        # just to be safe we use a bit less memory than allowed.
+        stepsize = min(
+            int(memory / (imagesize * len(reader.varnames) * 3)),
+            len(reader.timestamps),
+        )
+    logging.info(f"write_transposed_dataset: Using {stepsize} images per step")
 
-        # first, get some info about structure of the input file
-        first_img = reader.read_block(start=timestamps[0], end=timestamps[0])[
-            varname
-        ]
-        tmp_chunks = _get_intermediate_chunks(
-            first_img, chunks, new_last_dim, zarr_output, memory
+    # calculate chunk sizes if they are not given
+    if chunks is None:
+        if outfname.endswith(".zarr"):
+            chunksizes = infer_chunksizes(new_dimsizes, 100, maxdtypesize)
+        else:
+            chunksizes = infer_chunksizes(new_dimsizes, 1, maxdtypesize)
+        chunks = dict(zip(dims, chunksizes))
+    else:
+        chunks = copy.copy(chunks)
+    logging.info(f"Chunking to: {chunks}")
+
+    # There are 2 conditions for the temporary chunks:
+    # - they shouldn't be larger than 100MB
+    # - they should only be so large that 2**(d-1) chunks of full length (full
+    #   timeseries) can be read without violating the memory constraint
+    # If d is the number of dimensions, s the dtype size, n_st the stepsize,
+    # and nb the chunk size of the "base dimensions", then we have:
+    # - nb <= (100MB / (n_st * s))**(1/(d-1))
+    # - nb <= 0.3 * (memory/(2 * nt * s))**(1/(d-1))
+    d = len(new_dimsizes)
+    s = maxdtypesize / 1024 / 1024  # convert to MB
+    nt = len(timestamps)
+    nb1 = (100 / (stepsize * s)) ** (1 / (d - 1))
+    nb2 = 0.3 * (memory * 1024 / (2 * nt * s)) ** (1 / (d - 1))
+    logging.info(f"nb1 = {nb1:.2f}, nb2 = {nb2:.2f}")
+    nb = int(np.floor(min(nb1, nb2)))
+    tmp_chunksizes = [min(nb, new_dimsizes[i]) for i in range(d - 1)] + [
+        stepsize
+    ]
+    logging.info(f"Intermediate chunksizes: {tmp_chunksizes}")
+
+    # check if target chunk sizes are not too big
+    chunksizes = list(chunks.values())
+    if np.prod(chunksizes[:-1]) > nb1 ** (d - 1):
+        logging.warn(
+            "The specified chunksizes will lead to chunks larger than 100MB!"
+        )
+    if np.prod(chunksizes[:-1]) > nb2 ** (d - 1):
+        logging.warn(
+            "The final chunksizes are probably too large for the "
+            "available memory. In case you run into problems, try "
+            "to set smaller chunk sizes or increase the available "
+            "memory."
         )
 
-        # get new dim names in the correct order
-        new_dim_names = list(tmp_chunks)
-        variable_dims[varname] = new_dim_names
-
-        # this happens this late because we need to set
-        # `variable_dims[varname]` in any case
-        if Path(tmp_outfname).exists():
-            logging.info(f"{str(tmp_outfname)} already exists, skipping.")
-            continue
-
-        logging.debug(
-            f"write_transposed_dataset: starting zarr array creation"
-            f" for {len(timestamps)} timestamps"
-        )
-
-        # get shape of transposed target array
-        dims = dict(zip(first_img.dims, first_img.shape))
-        transposed_shape = tuple(dims[dim] for dim in tmp_chunks.keys())
-        zarr_array = zarr.create(
-            tuple(new_dim_sizes),
-            chunks=tuple(size for size in tmp_chunks.values()),
-            store=tmp_outfname,
+    # create zarr arrays
+    tmp_stores = {}
+    tmp_fnames = {}
+    for var in reader.varnames:
+        tmp_fnames[var] = outfname + "." + var + ".tmp.zarr"
+        tmp_stores[var] = zarr.create(
+            new_dimsizes,
+            chunks=tmp_chunksizes,
+            store=tmp_fnames[var],
             overwrite=True,
             fill_value=np.nan,
         )
 
-        logging.debug(f"write_transposed_dataset: Writing {tmp_outfname}")
-        print(f"Constructing array stack for {varname}:")
-        pbar = tqdm(range(0, len(timestamps), stepsize))
-        stepsize = tmp_chunks[new_last_dim]
-        for start_idx in pbar:
-            pbar.set_description("Reading")
-            end_idx = min(start_idx + stepsize - 1, len(timestamps) - 1)
-            block = reader.read_block(
-                timestamps[start_idx], timestamps[end_idx]
-            )[varname]
-            block = block.transpose(..., new_last_dim)
-            pbar.set_description("Writing")
-            zarr_array[..., start_idx : end_idx + 1] = block.values
+    # Write the images to zarr files, one file for each variable
+    if stepsize == 1:
+        readersettings["use_tqdm"] = True
+    if isinstance(reader, DirectoryImageReader):
+        oldsettings = {name: getattr(reader, name) for name in readersettings}
+        for name, value in readersettings.items():
+            setattr(reader, name, value)
+    pbar = tqdm(range(0, len(timestamps), stepsize))
+    for start_idx in pbar:
+        pbar.set_description("Reading")
+        end_idx = min(start_idx + stepsize - 1, len(timestamps) - 1)
 
-    variable_arrays = {}
+        block = reader.read_block(
+            timestamps[start_idx], timestamps[end_idx]
+        ).compute()
+        block = block.transpose(..., reader.timename)
+        pbar.set_description("Writing")
+        for var in reader.varnames:
+            tmp_stores[var][..., start_idx : end_idx + 1] = block[var].values
+
+    # Now we just have to assemble all arrays to a single big dataset
+    arrays = {}
     encoding = {}
-    for varname, fname in variable_fnames.items():
-        logging.debug(f"Reading {str(fname)}")
-        arr = da.from_zarr(fname)
-        dims = variable_dims[varname]
-        metadata = reader.array_attrs[varname]
-        if chunks is None:
-            if zarr_output:
-                chunks = infer_chunks(new_dim_sizes, 100, dtype)
-            else:
-                # netCDF chunks should be about 1MB
-                chunks = infer_chunks(new_dim_sizes, 1, dtype)
-        encoding[varname] = {
-            "chunksizes": chunks,
-            "zlib": zlib,
-            "complevel": complevel,
-        }
-        chunk_dict = dict(zip(dims, chunks))
-        arr = xr.DataArray(data=arr, dims=dims, attrs=metadata)
-        arr = arr.chunk(chunk_dict)
-        arr.encoding = encoding[varname]
-        # we're writing again to a temporary file, because otherwise the
-        # dataset creation fails because dask sucks
-        # arr.to_dataset(name=varname).to_zarr(fname + ".tmp", consolidated=True)
-        # variable_arrays[varname] = xr.open_zarr(fname + ".tmp", consolidated=True)
-        variable_arrays[varname] = arr
-
-    logging.debug("Reading test image")
-    test_img = reader.read_block(start=timestamps[0], end=timestamps[0])[
-        reader.varnames[0]
-    ]
-    coords = {
-        c: test_img.coords[c] for c in test_img.coords if c != reader.timename
-    }
-    coords[reader.timename] = timestamps
-    logging.debug("Creating dataset")
-    ds = xr.Dataset(
-        variable_arrays,
-        coords=coords,
-    )
+    for var in reader.varnames:
+        arr = da.from_zarr(tmp_fnames[var])
+        arrays[var] = xr.DataArray(arr, dims=dims, coords=coords)
+        arrays[var].name = var
+        arrays[var].attrs.update(reader.array_attrs[var])
+        arrays[var] = arrays[var].chunk(chunks)
+        if outfname.endswith(".zarr"):
+            encoding[var] = {
+                "chunks": tuple(size for size in chunks.values()),
+                "compressor": zarr.Blosc(cname="zstd", clevel=complevel),
+            }
+        else:
+            encoding[var] = {
+                "zlib": zlib,
+                "complevel": complevel,
+                "chunksizes": tuple(size for size in chunks.values()),
+            }
+    ds = xr.Dataset(arrays)
     ds.attrs.update(reader.global_attrs)
 
+    # Now we can write the dataset
     logging.info(
         f"write_transposed_dataset: Writing combined file to {str(outfname)}"
     )
-    if not zarr_output:
-        ds.to_netcdf(outfname, encoding=encoding)
-    else:
+    if outfname.endswith(".zarr"):
         ds.to_zarr(outfname, mode="w", consolidated=True)
+    else:
+        ds.to_netcdf(outfname, encoding=encoding)
 
-    for fname in variable_fnames.values():
+    # restore the reader settings
+    if isinstance(reader, DirectoryImageReader):
+        for name, value in oldsettings.items():
+            setattr(reader, name, value)
+
+    for fname in tmp_fnames.values():
         shutil.rmtree(fname)
     logging.info("write_transposed_dataset: Finished writing transposed file.")

@@ -22,14 +22,14 @@ def str2bool(val):
         return False
 
 
-def infer_chunks(dim_sizes: Sequence, target_size: float, dtype) -> tuple:
+def infer_chunksizes(dimsizes: Sequence, target_size: float, dtype) -> tuple:
     """
-    Calculates a good chunk size for the given dimensions using a continuous
+    Calculates a good chunk size for the given dimensions using a contiguous
     chunk for the last dimension.
 
     Parameters
     ----------
-    dim_sizes : Sequence
+    dimsizes : Sequence
         Dimension sizes.
     target_size : float
         Target size of a single chunk in MB. Note that for NetCDF files on
@@ -42,9 +42,20 @@ def infer_chunks(dim_sizes: Sequence, target_size: float, dtype) -> tuple:
     -------
     chunks : tuple
     """
-    dtype_size = np.dtype(dtype).itemsize
-    image_size = target_size / dtype_size / dim_sizes[-1] * 1024 * 1024
-    chunk_size = int(floor(sqrt(image_size)))
-    chunks = [min(chunk_size, dim_sizes[i]) for i in range(len(dim_sizes) - 1)]
-    chunks.append(dim_sizes[-1])
+    if isinstance(dtype, int):
+        dtype_size = dtype
+    else:
+        dtype_size = np.dtype(dtype).itemsize
+    # if we imagine a chunk to be a cuboid, and the last (contiguous) dimension
+    # the height, then 'chunk_size' is the size of the base area (in number of
+    # elements)
+    chunk_size = target_size / dtype_size / dimsizes[-1] * 1024 * 1024
+    # we can get the size of a single base side by taking the square root,
+    # i.e. **(1/2), or in general, **(1/(d-1))
+    d = len(dimsizes)
+    base_size = int(floor(chunk_size ** (1 / (d - 1))))
+    # use base size or dim size, whichever is smaller
+    chunks = [min(base_size, dimsizes[i]) for i in range(d - 1)]
+    # the last chunks should be contiguous
+    chunks.append(dimsizes[-1])
     return tuple(chunks)

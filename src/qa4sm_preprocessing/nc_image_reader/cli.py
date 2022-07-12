@@ -157,10 +157,10 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             type=str2bool,
             default=False,
             help=(
-                "Switch to average sub-daily images to the relative daily level."
-                "This will only be effective in case the dataset has a sub-daily"
-                "resolution."
-            )
+                "Switch to average sub-daily images to the relative daily"
+                " level. This will only be effective in case the dataset"
+                " has a sub-daily resolution."
+            ),
         )
         self.add_argument(
             "--discard_attrs",
@@ -169,7 +169,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help=(
                 "Switch to discard the global attributes present in the "
                 "netCDF files of the input dataset."
-            )
+            ),
         )
         self.add_argument(
             "--bbox",
@@ -304,13 +304,17 @@ def parse_args(parser, args):
             input_path, args.parameter, **common_reader_kwargs,
         )
     else:
+        if args.daily_average:
+            average = "daily"
+        else:
+            average = None
         reader = DirectoryImageReader(
             input_path,
             args.parameter,
             fmt=args.time_fmt,
             pattern=args.pattern,
             time_regex_pattern=args.time_regex_pattern,
-            daily_average=args.daily_average,
+            average=average,
             discard_attrs=args.discard_attrs,
             **common_reader_kwargs,
         )

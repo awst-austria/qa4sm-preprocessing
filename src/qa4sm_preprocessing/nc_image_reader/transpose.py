@@ -170,6 +170,7 @@ def _transpose(
         else:
             chunksizes = infer_chunksizes(new_dimsizes, 1, maxdtypesize)
         chunks = dict(zip(dims, chunksizes))
+        chunksizes = list(chunksizes)
     else:
         chunks = copy.copy(chunks)
         chunksizes = list(chunks.values())[:-1] + [len(timestamps)]

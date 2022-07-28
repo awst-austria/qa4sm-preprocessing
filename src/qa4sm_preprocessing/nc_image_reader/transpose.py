@@ -172,40 +172,41 @@ def _transpose(
         chunks = dict(zip(dims, chunksizes))
     else:
         chunks = copy.copy(chunks)
+        chunksizes = list(chunks.values())[:-1] + [len(timestamps)]
     logging.info(f"Chunking to: {chunks}")
 
-    # There are 2 conditions for the temporary chunks:
-    # - they shouldn't be larger than 100MB
-    # - they should only be so large that 2**(d-1) chunks of full length (full
-    #   timeseries) can be read without violating the memory constraint
-    # If d is the number of dimensions, s the dtype size, n_st the stepsize,
-    # and nb the chunk size of the "base dimensions", then we have:
-    # - nb <= (100MB / (n_st * s))**(1/(d-1))
-    # - nb <= 0.3 * (memory/(2 * nt * s))**(1/(d-1))
-    d = len(new_dimsizes)
+    # We make the intermediate size of the "chunk base" (i.e. chunk dimension
+    # without time direction) a bit bigger than the final ones, so we have less
+    # chunks to read and therefore less overhead (can be signifcant).
+    # For this, we adapt the chunk sizes of the first dimension to be the
+    # largest possible that still meets the two conditions:
+    # - chunks shouldn't be larger than 100MB
+    # - chunks should only be so large that 2 chunks of full timeseries length
+    #   fit into memory
+    # Let n1 be the chunk size of the first dimension, no be the product of the
+    # chunksizes except the first and last (time), nt the number of timesteps,
+    # and ns the stepsize, and s the dtypesize. Then we have:
+    # - n1a * no * ns <= 100MB / s <=> n1a = 100MB / (s * no * ns)
+    # - n1b * no * nt * 2 <= memory / s  <=> n1b = memory / (2 * no * nt * s)
+
     s = maxdtypesize / 1024 / 1024  # convert to MB
     nt = len(timestamps)
-    nb1 = (100 / (stepsize * s)) ** (1 / (d - 1))
-    nb2 = 0.3 * (memory * 1024 / (2 * nt * s)) ** (1 / (d - 1))
-    logging.info(f"nb1 = {nb1:.2f}, nb2 = {nb2:.2f}")
-    nb = int(np.floor(min(nb1, nb2)))
-    tmp_chunksizes = [min(nb, new_dimsizes[i]) for i in range(d - 1)] + [
-        stepsize
-    ]
+    no = np.prod(chunksizes) / (nt * chunksizes[0])
+    nt = len(timestamps)
+    n1a = 100 / (stepsize * s * no)
+    n1b = 0.2 * (memory * 1024 / (2 * no * nt * s))
+    logging.info(f"n1a = {n1a:.2f}, n1b = {n1b:.2f}")
+    n1 = int(np.floor(min(n1a, n1b)))
+    tmp_chunksizes = copy.copy(chunksizes)
+    tmp_chunksizes[0] = min(n1, new_dimsizes[0], chunksizes[0])
+    tmp_chunksizes[-1] = stepsize
     logging.info(f"Intermediate chunksizes: {tmp_chunksizes}")
 
     # check if target chunk sizes are not too big
     chunksizes = list(chunks.values())
-    if np.prod(chunksizes[:-1]) > nb1 ** (d - 1):
+    if np.prod(chunksizes) * s > 100:
         logging.warn(
             "The specified chunksizes will lead to chunks larger than 100MB!"
-        )
-    if np.prod(chunksizes[:-1]) > nb2 ** (d - 1):
-        logging.warn(
-            "The final chunksizes are probably too large for the "
-            "available memory. In case you run into problems, try "
-            "to set smaller chunk sizes or increase the available "
-            "memory."
         )
 
     # create zarr arrays

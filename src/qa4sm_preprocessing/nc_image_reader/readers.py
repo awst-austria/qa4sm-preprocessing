@@ -663,7 +663,7 @@ class DirectoryImageReader(XarrayImageReaderBase):
 
         # first, we walk over the whole directory subtree and find any files
         # that match our pattern
-        directory = Path(directory)
+        directory = Path(directory).expanduser().resolve()
         filepaths = self._get_filepaths(directory, pattern)
         ds = self._get_example_dataset(filepaths)
         varnames, rename, level = self._get_varnames_rename_level(

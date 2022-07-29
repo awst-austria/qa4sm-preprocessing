@@ -14,7 +14,7 @@ import shutil
 import zarr
 
 from .utils import infer_chunksizes
-from .readers import DirectoryImageReader
+from .image import DirectoryImageReader
 
 
 Reader = TypeVar("Reader")
@@ -206,9 +206,7 @@ def _transpose(
     # check if target chunk sizes are not too big
     chunksizes = list(chunks.values())
     if np.prod(chunksizes) * s > 100:
-        logging.warn(
-            "The specified chunksizes will lead to chunks larger than 100MB!"
-        )
+        logging.warn("The specified chunksizes will lead to chunks larger than 100MB!")
 
     # create zarr arrays
     tmp_stores = {}
@@ -224,20 +222,21 @@ def _transpose(
         )
 
     # Write the images to zarr files, one file for each variable
-    if stepsize == 1:
-        readersettings["use_tqdm"] = True
-    if isinstance(reader, DirectoryImageReader):
-        oldsettings = {name: getattr(reader, name) for name in readersettings}
-        for name, value in readersettings.items():
-            setattr(reader, name, value)
+
+    # we need to set cache and chunks to False in the reader open_dataset_kwargs
+    if hasattr(reader, "open_dataset_kwargs"):
+        orig_cache = reader.open_dataset_kwargs.get("cache")
+        orig_chunks = reader.open_dataset_kwargs.get("chunks")
+        reader.open_dataset_kwargs.update({"cache": False, "chunks": None})
+    if hasattr(reader, "use_tqdm"):
+        orig_tqdm = reader.use_tqdm
+        reader.use_tqdm = stepsize == 1
     pbar = tqdm(range(0, len(timestamps), stepsize))
     for start_idx in pbar:
         pbar.set_description("Reading")
         end_idx = min(start_idx + stepsize - 1, len(timestamps) - 1)
 
-        block = reader.read_block(
-            timestamps[start_idx], timestamps[end_idx]
-        ).compute()
+        block = reader.read_block(timestamps[start_idx], timestamps[end_idx]).compute()
         block = block.transpose(..., reader.timename)
         pbar.set_description("Writing")
         for var in reader.varnames:
@@ -267,18 +266,17 @@ def _transpose(
     ds.attrs.update(reader.global_attrs)
 
     # Now we can write the dataset
-    logging.info(
-        f"write_transposed_dataset: Writing combined file to {str(outfname)}"
-    )
+    logging.info(f"write_transposed_dataset: Writing combined file to {str(outfname)}")
     if outfname.endswith(".zarr"):
         ds.to_zarr(outfname, mode="w", consolidated=True)
     else:
         ds.to_netcdf(outfname, encoding=encoding)
 
     # restore the reader settings
-    if isinstance(reader, DirectoryImageReader):
-        for name, value in oldsettings.items():
-            setattr(reader, name, value)
+    if hasattr(reader, "use_tqdm"):
+        reader.use_tqdm = orig_tqdm
+    if hasattr(reader, "open_dataset_kwargs"):
+        reader.open_dataset_kwargs.update({"cache": orig_cache, "chunks": orig_chunks})
 
     for fname in tmp_fnames.values():
         shutil.rmtree(fname)

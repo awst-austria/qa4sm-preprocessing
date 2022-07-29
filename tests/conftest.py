@@ -5,7 +5,7 @@ import pytest
 import shutil
 import xarray as xr
 
-from qa4sm_preprocessing.nc_image_reader.readers import (
+from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
     XarrayImageStackReader,
 )
@@ -94,8 +94,8 @@ def default_directory_reader():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     return reader
 

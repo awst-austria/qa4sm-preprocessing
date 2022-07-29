@@ -7,13 +7,13 @@ import xarray as xr
 
 from repurpose.img2ts import Img2Ts
 
-from qa4sm_preprocessing.nc_image_reader.readers import (
+from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
     XarrayImageStackReader,
     XarrayTSReader,
     GriddedNcOrthoMultiTs,
 )
-from qa4sm_preprocessing.nc_image_reader.utils import mkdate
+from qa4sm_preprocessing.reading.utils import mkdate
 
 # this is defined in conftest.py
 from pytest import test_data_path
@@ -120,8 +120,8 @@ def test_directory_reader_setup():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     runtime = time.time() - start
     print(f"Setup time with fmt string: {runtime:.2e}")
@@ -136,8 +136,8 @@ def test_directory_reader_setup():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     runtime2 = time.time() - start
     print(f"Setup time without fmt string: {runtime2:.2e}")
@@ -160,8 +160,8 @@ def test_time_regex():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     validate_reader(reader)
 

@@ -31,7 +31,7 @@ import sys
 
 from repurpose.img2ts import Img2Ts
 
-from .readers import XarrayImageStackReader, DirectoryImageReader
+from . import XarrayImageStackReader, DirectoryImageReader
 from .transpose import write_transposed_dataset
 from .utils import mkdate, str2bool
 
@@ -97,7 +97,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help=(
                 "If DATASET_ROOT is a directory, a regex pattern to select"
                 " the time string from the filename. If this is used, TIME_FMT"
-                " must be chosen accordingly. See nc_image_reader.readers for"
+                " must be chosen accordingly. See reading.image for"
                 " more info."
             ),
         )
@@ -131,8 +131,8 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         self.add_argument(
             "--lat",
             type=float,
-            metavar=("START", "STEP"),
-            nargs=2,
+            metavar=("START", "STOP", "STEP"),
+            nargs=3,
             default=None,
             help=(
                 "Start and stepsize for latitude vector, in case it can"
@@ -143,8 +143,8 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         self.add_argument(
             "--lon",
             type=float,
-            metavar=("START", "STEP"),
-            nargs=2,
+            metavar=("START", "STOP", "STEP"),
+            nargs=3,
             default=None,
             help=(
                 "Start and stepsize for longitude vector, in case it can"

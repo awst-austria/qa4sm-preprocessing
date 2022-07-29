@@ -404,6 +404,47 @@ def test_image_time_dimension(test_output_path):
             img = reader.read_block(tstamp, tstamp)
             assert np.all(img.X.values == expected)
 
+###############################################################################
+# Files with multiple timesteps
+###############################################################################
+
+
+def test_image_multiple_timesteps(test_output_path):
+    # create test dataset with subdaily timestamps
+    nlat, nlon, ntime = 5, 5, 20
+    lat = np.linspace(0, 1, nlat)
+    lon = np.linspace(0, 1, nlon)
+    time = pd.date_range("2000", periods=ntime, freq="6H")
+
+    X = np.ones((ntime, nlat, nlon), dtype=np.float32)
+    X = (X.T * np.arange(ntime)).T
+
+    ds = xr.Dataset(
+        {"X": (["time", "lat", "lon"], X)},
+        coords={"time": time, "lat": lat, "lon": lon},
+    )
+
+    # Write daily files containing 4 timesteps
+    outpath = (
+        test_output_path / f"multistep_images"
+    )
+    outpath.mkdir(exist_ok=True, parents=True)
+    days = pd.date_range(time[0], time[-1], freq="D")
+    for d in days:
+        img = ds.sel(time=slice(d, d + pd.Timedelta("23H")))
+        fname = d.strftime("img_%Y%m%d.nc")
+        img.to_netcdf(outpath / fname)
+
+    reader = DirectoryImageReader(
+        outpath,
+        varnames=["X"],
+        fmt="img_%Y%m%d.nc",
+        timestamps=[pd.Timedelta(f"{i}H") for i in [0, 6, 12, 18]]
+    )
+    assert np.all(reader.timestamps == time)
+    assert len(reader._file_tstamp_map) == ntime // 4
+    block = reader.read_block()
+    assert np.all(block.X.values == X)
 
 ###############################################################################
 # Full chain with time offset

@@ -125,22 +125,29 @@ def _transpose(
     complevel: int = 4,
     stepsize: int = None,
 ):
-    # there are some reader settings that we need to set to different values,
-    # they will be reset later
-    readersettings = {
-        "cache": False,  # don't hang onto old files
-        "chunks": None,  # we don't need dask
-        "use_tqdm": False,  # we have our own progressbar
-    }
+    # Some reader settings need to be adapted for the duration of this routine
+    if hasattr(reader, "open_dataset_kwargs"):
+        orig_cache = reader.open_dataset_kwargs.get("cache")
+        orig_chunks = reader.open_dataset_kwargs.get("chunks")
+        reader.open_dataset_kwargs.update({"cache": False, "chunks": None})
+    if hasattr(reader, "use_tqdm"):
+        orig_tqdm = reader.use_tqdm
+        new_tqdm = stepsize == 1
+        reader.use_tqdm = new_tqdm
 
     outfname = str(outfname)
     timestamps = reader.tstamps_for_daterange(start, end)
 
     # figure out coordinates and dimensions based on test image
-    testarr = reader.read_block(timestamps[0], timestamps[0])
-    coords = dict(testarr.coords)
+    # for reading the test image, disable tqdm
+    if hasattr(reader, "use_tqdm"):
+        reader.use_tqdm = False
+    testds = reader.read_block(timestamps[0], timestamps[0])
+    if hasattr(reader, "use_tqdm"):
+        reader.use_tqdm = new_tqdm
+    coords = dict(testds.coords)
     coords[reader.timename] = timestamps
-    dims = dict(testarr.dims)
+    dims = dict(testds.dims)
     del dims[reader.timename]
     dims[reader.timename] = len(timestamps)
     new_dimsizes = tuple(size for size in dims.values())
@@ -150,7 +157,7 @@ def _transpose(
     # because this will limit the size
     maxdtypesize = 0
     for var in reader.varnames:
-        maxdtypesize = max(maxdtypesize, testarr[var].dtype.itemsize)
+        maxdtypesize = max(maxdtypesize, testds[var].dtype.itemsize)
     imagesize = np.prod(new_dimsizes[:-1]) * maxdtypesize / 1024**3  # in GB
     if stepsize is None:
         # The available memory governs how many images we can read at once:
@@ -172,7 +179,13 @@ def _transpose(
         chunks = dict(zip(dims, chunksizes))
         chunksizes = list(chunksizes)
     else:
-        chunks = copy.copy(chunks)
+        new_chunks = {}
+        for i, name in enumerate(dims):
+            if name in chunks and chunks[name] > 0:
+                new_chunks[name] = chunks[name]
+            else:
+                new_chunks[name] = new_dimsizes[i]
+        chunks = new_chunks
         chunksizes = list(chunks.values())[:-1] + [len(timestamps)]
     logging.info(f"Chunking to: {chunks}")
 
@@ -184,7 +197,7 @@ def _transpose(
     # - chunks shouldn't be larger than 100MB
     # - chunks should only be so large that 2 chunks of full timeseries length
     #   fit into memory
-    # Let n1 be the chunk size of the first dimension, no be the product of the
+    # Let n1 be the chunk size of the first dimension, 'no' be the product of the
     # chunksizes except the first and last (time), nt the number of timesteps,
     # and ns the stepsize, and s the dtypesize. Then we have:
     # - n1a * no * ns <= 100MB / s <=> n1a = 100MB / (s * no * ns)
@@ -196,7 +209,7 @@ def _transpose(
     nt = len(timestamps)
     n1a = 100 / (stepsize * s * no)
     n1b = 0.2 * (memory * 1024 / (2 * no * nt * s))
-    logging.info(f"n1a = {n1a:.2f}, n1b = {n1b:.2f}")
+    logging.debug(f"n1a = {n1a:.2f}, n1b = {n1b:.2f}")
     n1 = int(np.floor(min(n1a, n1b)))
     tmp_chunksizes = copy.copy(chunksizes)
     tmp_chunksizes[0] = min(n1, new_dimsizes[0], chunksizes[0])
@@ -213,24 +226,20 @@ def _transpose(
     tmp_fnames = {}
     for var in reader.varnames:
         tmp_fnames[var] = outfname + "." + var + ".tmp.zarr"
+        dtype = testds[var].dtype
+        default_fill_value = -9999 if np.issubdtype(np.int32, np.integer) else np.nan
+        fill_value = testds[var].attrs.get("_FillValue", default_fill_value)
         tmp_stores[var] = zarr.create(
             new_dimsizes,
             chunks=tmp_chunksizes,
             store=tmp_fnames[var],
             overwrite=True,
-            fill_value=np.nan,
+            fill_value=fill_value,
+            dtype=dtype,
         )
 
     # Write the images to zarr files, one file for each variable
 
-    # we need to set cache and chunks to False in the reader open_dataset_kwargs
-    if hasattr(reader, "open_dataset_kwargs"):
-        orig_cache = reader.open_dataset_kwargs.get("cache")
-        orig_chunks = reader.open_dataset_kwargs.get("chunks")
-        reader.open_dataset_kwargs.update({"cache": False, "chunks": None})
-    if hasattr(reader, "use_tqdm"):
-        orig_tqdm = reader.use_tqdm
-        reader.use_tqdm = stepsize == 1
     pbar = tqdm(range(0, len(timestamps), stepsize))
     for start_idx in pbar:
         pbar.set_description("Reading")

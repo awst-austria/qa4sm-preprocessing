@@ -186,13 +186,21 @@ class XarrayReaderBase:
         # coordinate is not a dimension, so we have to infer it from a variable
         coord = ds[cname]
         if coord.ndim > 1:
-            axis = ds.dims.index(dimname)
-            coord = self._get_coord_from_2d(
-                coord.values, axis, fill_value=coord.attrs["_FillValue"]
+            axis = list(ds.dims).index(dimname)
+            if "_FillValue" in coord.attrs:
+                fill_value = coord.attrs["_FillValue"]
+            elif hasattr(self, "fill_value"):
+                fill_value = self.fill_value
+            else:
+                fill_value = None
+            coord = self.coord_from_2d(
+                coord.values, axis, fill_value=fill_value
             )
-        return coord.values
+            return coord
+        else:
+            return coord.values
 
-    def coord_from_2d(coord, axis, fill_value=-9999):
+    def coord_from_2d(self, coord, axis, fill_value=-9999):
         # It happens often that coordinates of a regular grid are still given
         # as 2D arrays, often also with fill values at non-land locations.
         # To get the 1D array, we therefore take the nanmean along the

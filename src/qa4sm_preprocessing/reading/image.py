@@ -142,7 +142,7 @@ grid). A reader could look like this::
 
             super().__init__(
                 directory,
-                ["SMAP_L3_SM_AM", "SMAP_L3_SM_PM"],
+                "SMAP_L3_SM",
                 fmt="%Y%m%d",
                 time_regex_pattern=r"SMAP_L3_SM_P_([0-9]+)_R.*.h5",
                 pattern="*.h5",
@@ -156,15 +156,14 @@ grid). A reader could look like this::
             with h5py.File(fname, "r") as f:
                 for op in ["AM", "PM"]:
                     sm = self._read_overpass(f, op)
-                    sm.name = f"SMAP_L3_SM_{op}"
                     sm_arrs.append(sm)
             # Now we have read the AM and PM retrievals, but we still need to
             # concatenate them along a new time axis. We don't have to set the
             # actual time values though, since they will be inferred from the
             # filename in combination with the timestamps passed in the
             # constructor.
-            ds = xr.concat(sm_arrs, dim="time")
-            return ds
+            sm = xr.concat(sm_arrs, dim="time")
+            return sm.to_dataset(name="SMAP_L3_SM")
 
         def _read_overpass(self, f, op):
             names = self.overpass_dict[op]
@@ -178,8 +177,8 @@ grid). A reader could look like this::
         def _latlon_from_dataset(self, fname):
             with h5py.File(fname, "r") as f:
                 g = f["Soil_Moisture_Retrieval_Data_AM"]
-                lat = self._get_coord_from_2d(g["latitude"], 0, fill_value=-9999)
-                lon = self._get_coord_from_2d(g["longitude"], 1, fill_value=-9999)
+                lat = self.coord_from_2d(g["latitude"], 0, fill_value=-9999)
+                lon = self.coord_from_2d(g["longitude"], 1, fill_value=-9999)
             return lat, lon
 
 In this example we also adapted ``_latlon_from_dataset``. Instead, we could have
@@ -425,6 +424,16 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             open_dataset_kwargs["chunks"] = None
         self.open_dataset_kwargs = open_dataset_kwargs.copy()
 
+        varnames, rename, level = self._fix_varnames_rename_level(
+            varnames, rename, level, skip_missing
+        )
+        self.rename = rename
+        self.level = self.normalize_level(level, varnames)
+        self.transpose = transpose
+        self.average = average
+        self.use_tqdm = use_tqdm
+        self.fill_value = fill_value
+
         super().__init__(
             self._example_file,
             varnames,
@@ -444,10 +453,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             construct_grid=construct_grid,
         )
 
-        self.average = average
-        self.transpose = transpose
-        self.use_tqdm = use_tqdm
-        self.fill_value = fill_value
 
         #############################################################################
         # Time information
@@ -483,19 +488,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         if discard_attrs:
             self.discard_attrs()
 
-        if skip_missing:
-            # Be careful: skip_missing only works if _open_dataset does not do
-            # any selection of varnames, renaming, or selection of levels.
-            # In the default setup this is the case, but in subclasses this
-            # might be different.
-            # However, then it's the resposibility of whoever subclasses to
-            # make sure that skip_missing is always disabled.
-            ds = self._open_dataset(self._example_file)
-            self.varnames, rename, level = self._fix_varnames_rename_level(
-                ds, varnames, rename, level
-            )
-        self.rename = rename
-        self.level = self.normalize_level(level, self.varnames)
 
         # Done
         #############################################################################
@@ -577,7 +569,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
     @property
     def example_dataset(self) -> xr.Dataset:
         if not hasattr(self, "_example_dataset") or self._example_dataset is None:
-            self._example_dataset = self._open_dataset(self._example_file)
+            self._example_dataset = self._make_nicer_ds(self._open_dataset(self._example_file))
         return self._example_dataset
 
     def _calculate_averaging_timestamp(self, tstamp) -> datetime.datetime:
@@ -645,8 +637,20 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             for varname in self.varnames:
                 arr = ds[varname]
                 if self.timename in arr.dims:
+                    # if there are multiple timestamps in each file, reading is
+                    # a bit more complicated. In the easiest case, we have as
+                    # many timestamps as there are in the file, and we can just
+                    # return it.
+                    # Otherwise, if time is a coordinate, we can use
+                    # .sel(tstamps). If this is also not the case, we need to
+                    # find the indices of tstamps in the file
                     if len(tstamps) != len(arr[self.timename]):
-                        arr = arr.sel({self.timename: tstamps})
+                        if self.timename in arr.coords:
+                            arr = arr.sel({self.timename: tstamps})
+                        else:
+                            all_tstamps = self._file_tstamp_map[fname]
+                            ids = [all_tstamps.index(ts) for ts in tstamps]
+                            arr = arr.isel({self.timename: ids})
                     block_dict[varname].append(arr.data)
                 else:
                     block_dict[varname].append(arr.data[np.newaxis, ...])
@@ -664,7 +668,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             ds = ds.rename(self.rename)
         return ds
 
-    def _fix_varnames_rename_level(self, ds, varnames, rename, level):
+    def _fix_varnames_rename_level(self, varnames, rename, level, skip_missing):
         # To skip missing variables, we have to remove the variable names
         # from `varnames`, `rename`, and `level`.
         # Since `varnames` contains the final variable names, we first have
@@ -687,62 +691,72 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         #
         # (note the missing LAI, since we derive the map from the variables
         # in the file)
+        if isinstance(varnames, str):
+            varnames = [varnames]
+        if skip_missing:
+            # Be careful: skip_missing only works if _open_dataset does not do
+            # any selection of varnames, renaming, or selection of levels.
+            # In the default setup this is the case, but in subclasses this
+            # might be different.
+            # However, then it's the resposibility of whoever subclasses to
+            # make sure that skip_missing is always disabled.
+            ds = self._open_dataset(self._example_file)
 
-        if level is None:
-            namemapl1 = {var: [var] for var in ds.data_vars}
-        else:
-            namemapl1 = {}
-            for var in ds.data_vars:
-                if var in level:
-                    levelvars = self.__class__._select_levels_iteratively(
-                        var, ds[var], level[var]
-                    )
-                    namemapl1[var] = [name for name, _ in levelvars]
-                else:
-                    namemapl1[var] = [var]
-
-            # Now we can already check which of the keys in namemapl1 are
-            # not available in the files and remove them from `level`.
-            new_level = level.copy()
-            for var in level:
-                if var not in namemapl1:
-                    del new_level[var]
-            level = new_level
-
-        # In the next step we can apply the renaming:
-        #
-        # namemapl2 = {"SoilMoist_tavg": ["SSM", "RZSM"],
-        #              "Qs_tavg": ["RUNOFF"]}
-        #
-        if rename is None:
-            namemapl2 = namemapl1.copy()
-        else:
-            namemapl2 = {}
-            for file_var in namemapl1:
-                namemapl2[file_var] = [
-                    rename[orig_var] if orig_var in rename else orig_var
-                    for orig_var in namemapl1[file_var]
-                ]
-            # Now we can remove the entries in rename that do not have a
-            # corresponding entry in namemapl1
-            new_rename = rename.copy()
-            l1names = []
-            for file_var in namemapl1:
-                l1names += namemapl1[file_var]
-            for l1name in rename:
-                if l1name not in l1names:
-                    del new_rename[l1name]
-            rename = new_rename
-
-        # Now we can finally remove the non-existing varnames
-        l2names = []
-        for file_var in namemapl2:
-            l2names += namemapl2[file_var]
-        new_varnames = []
-        for l2name in varnames:
-            if l2name in l2names:
-                new_varnames.append(l2name)
+            if level is None:
+                namemapl1 = {var: [var] for var in ds.data_vars}
             else:
-                warnings.warn(f"Skipping variable {l2name} because it does not exist")
-        varnames = new_varnames
+                namemapl1 = {}
+                for var in ds.data_vars:
+                    if var in level:
+                        levelvars = self.__class__._select_levels_iteratively(
+                            var, ds[var], level[var]
+                        )
+                        namemapl1[var] = [name for name, _ in levelvars]
+                    else:
+                        namemapl1[var] = [var]
+
+                # Now we can already check which of the keys in namemapl1 are
+                # not available in the files and remove them from `level`.
+                new_level = level.copy()
+                for var in level:
+                    if var not in namemapl1:
+                        del new_level[var]
+                level = new_level
+
+            # In the next step we can apply the renaming:
+            #
+            # namemapl2 = {"SoilMoist_tavg": ["SSM", "RZSM"],
+            #              "Qs_tavg": ["RUNOFF"]}
+            #
+            if rename is None:
+                namemapl2 = namemapl1.copy()
+            else:
+                namemapl2 = {}
+                for file_var in namemapl1:
+                    namemapl2[file_var] = [
+                        rename[orig_var] if orig_var in rename else orig_var
+                        for orig_var in namemapl1[file_var]
+                    ]
+                # Now we can remove the entries in rename that do not have a
+                # corresponding entry in namemapl1
+                new_rename = rename.copy()
+                l1names = []
+                for file_var in namemapl1:
+                    l1names += namemapl1[file_var]
+                for l1name in rename:
+                    if l1name not in l1names:
+                        del new_rename[l1name]
+                rename = new_rename
+
+            # Now we can finally remove the non-existing varnames
+            l2names = []
+            for file_var in namemapl2:
+                l2names += namemapl2[file_var]
+            new_varnames = []
+            for l2name in varnames:
+                if l2name in l2names:
+                    new_varnames.append(l2name)
+                else:
+                    warnings.warn(f"Skipping variable {l2name} because it does not exist")
+            varnames = new_varnames
         return varnames, rename, level

@@ -7,13 +7,13 @@ import xarray as xr
 
 from repurpose.img2ts import Img2Ts
 
-from qa4sm_preprocessing.nc_image_reader.readers import (
+from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
     XarrayImageStackReader,
     XarrayTSReader,
     GriddedNcOrthoMultiTs,
 )
-from qa4sm_preprocessing.nc_image_reader.utils import mkdate
+from qa4sm_preprocessing.reading.utils import mkdate
 
 # this is defined in conftest.py
 from pytest import test_data_path
@@ -120,8 +120,8 @@ def test_directory_reader_setup():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     runtime = time.time() - start
     print(f"Setup time with fmt string: {runtime:.2e}")
@@ -136,8 +136,8 @@ def test_directory_reader_setup():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     runtime2 = time.time() - start
     print(f"Setup time without fmt string: {runtime2:.2e}")
@@ -160,8 +160,8 @@ def test_time_regex():
         latdim="north_south",
         londim="east_west",
         level={"SoilMoist_profiles": 0},
-        lat=(29.875, 0.25),
-        lon=(-11.375, 0.25),
+        lat=(29.875, 54.75, 0.25),
+        lon=(-11.375, 1.0, 0.25),
     )
     validate_reader(reader)
 
@@ -394,7 +394,7 @@ def test_image_time_dimension(test_output_path):
             outpath,
             varnames=["X"],
             fmt="img_%Y%m%dT%H%M%S.nc",
-            daily_average=True,
+            average="daily",
         )
         assert reader.timestamps[0] < reader.timestamps[-1]
         for i, tstamp in enumerate(reader.timestamps):
@@ -404,6 +404,47 @@ def test_image_time_dimension(test_output_path):
             img = reader.read_block(tstamp, tstamp)
             assert np.all(img.X.values == expected)
 
+###############################################################################
+# Files with multiple timesteps
+###############################################################################
+
+
+def test_image_multiple_timesteps(test_output_path):
+    # create test dataset with subdaily timestamps
+    nlat, nlon, ntime = 5, 5, 20
+    lat = np.linspace(0, 1, nlat)
+    lon = np.linspace(0, 1, nlon)
+    time = pd.date_range("2000", periods=ntime, freq="6H")
+
+    X = np.ones((ntime, nlat, nlon), dtype=np.float32)
+    X = (X.T * np.arange(ntime)).T
+
+    ds = xr.Dataset(
+        {"X": (["time", "lat", "lon"], X)},
+        coords={"time": time, "lat": lat, "lon": lon},
+    )
+
+    # Write daily files containing 4 timesteps
+    outpath = (
+        test_output_path / f"multistep_images"
+    )
+    outpath.mkdir(exist_ok=True, parents=True)
+    days = pd.date_range(time[0], time[-1], freq="D")
+    for d in days:
+        img = ds.sel(time=slice(d, d + pd.Timedelta("23H")))
+        fname = d.strftime("img_%Y%m%d.nc")
+        img.to_netcdf(outpath / fname)
+
+    reader = DirectoryImageReader(
+        outpath,
+        varnames=["X"],
+        fmt="img_%Y%m%d.nc",
+        timestamps=[pd.Timedelta(f"{i}H") for i in [0, 6, 12, 18]]
+    )
+    assert np.all(reader.timestamps == time)
+    assert len(reader._file_tstamp_map) == ntime // 4
+    block = reader.read_block()
+    assert np.all(block.X.values == X)
 
 ###############################################################################
 # Full chain with time offset

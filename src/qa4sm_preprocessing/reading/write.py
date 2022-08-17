@@ -11,6 +11,7 @@ def write_images(
     dataset: xr.Dataset,
     directory: Union[Path, str],
     dsname: str,
+    fmt: str = "%Y%m%dT%H%M",
     dim: str = "time",
     memory: float = 5,
     stepsize: int = 1,
@@ -27,7 +28,9 @@ def write_images(
         Directory to which the image files are written.
     dsname : str
         Name of the dataset. The final image file names will follow the pattern
-        "{dsname}_%Y%m%dT%H%M.nc"
+        "{dsname}_{fmt}.nc"
+    fmt : str, optional (default: "%Y%m%dT%H%M")
+        Format string for creating timestamps for the filenames.
     dim : str, optional (default: "time")
         Name of the time dimension.
     memory : float, optional (default: 5)
@@ -57,7 +60,7 @@ def write_images(
         ntime_stack = len(stack.indexes[dim])
         for timeidx in range(0, ntime_stack, stepsize):
             time = stack.indexes[dim][timeidx]
-            fname = directory / time.strftime(f"{dsname}_%Y%m%dT%H%M.nc")
+            fname = directory / time.strftime(f"{dsname}_{fmt}.nc")
             img = stack.sel(**{dim: stack.indexes[dim][timeidx:timeidx+stepsize]})
             img.to_netcdf(
                 fname,

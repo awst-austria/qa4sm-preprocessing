@@ -70,9 +70,6 @@ class XarrayTSReader(XarrayReaderBase):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
-    grid : BasicGrid, optional (default: None)
-        If the grid cannot be inferred from the file, it can also be passed
-        directly.
     construct_grid : bool, optional (default: True)
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
@@ -94,7 +91,6 @@ class XarrayTSReader(XarrayReaderBase):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        grid: BasicGrid = None,
         construct_grid: bool = True,
     ):
         if isinstance(varnames, str):
@@ -135,8 +131,7 @@ class XarrayTSReader(XarrayReaderBase):
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
-            grid=grid,
-            construct_grid=construct_grid
+            construct_grid=construct_grid,
         )
 
         if self.gridtype == "unstructured":

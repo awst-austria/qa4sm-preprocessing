@@ -41,7 +41,6 @@ class XarrayReaderBase:
         bbox: Iterable = None,
         cellsize: float = None,
         curvilinear: bool = False,
-        grid: BasicGrid = None,
         construct_grid: bool = True,
     ):
         # variable names
@@ -99,7 +98,7 @@ class XarrayReaderBase:
 
         # grid
         self.lat, self.lon, self.grid = self._gridinfo_from_dataset(
-            ds, lat, lon, grid, construct_grid=construct_grid
+            ds, lat, lon, construct_grid
         )
 
     def _landmask_from_dataset(self, ds: xr.Dataset, landmask):
@@ -111,7 +110,7 @@ class XarrayReaderBase:
         return global_attrs, array_attrs
 
     def _gridinfo_from_dataset(
-        self, ds: xr.Dataset, lat, lon, grid, construct_grid=True
+        self, ds: xr.Dataset, lat, lon, construct_grid
     ):
         """
         Full setup of grid when a dataset is available.
@@ -121,9 +120,9 @@ class XarrayReaderBase:
 
         # The grid can either be inferred from the arguments passed, or from
         # the first file in the dataset
-        if grid is not None or lat is not None or lon is not None:
+        if lat is not None or lon is not None:
             lat, lon, grid = self.gridinfo_from_arguments(
-                lat, lon, grid, construct_grid=construct_grid
+                lat, lon, construct_grid
             )
         else:
             lat, lon = self._latlon_from_dataset(ds)
@@ -133,27 +132,22 @@ class XarrayReaderBase:
                 grid = None
         return lat, lon, grid
 
-    def gridinfo_from_arguments(self, lat, lon, grid, construct_grid=True):
-        if grid is not None:
-            grid = self.finalize_grid(grid)
-            lat = grid.arrlat
-            lon = grid.arrlon
-        elif lat is not None or lon is not None:
-            assert (
-                lat is not None
-            ), "If custom lon is given, custom lat must also be given."
-            assert (
-                lon is not None
-            ), "If custom lat is given, custom lon must also be given."
-            lat = self.coord_from_argument(lat)
-            lon = self.coord_from_argument(lon)
-            if construct_grid:
-                grid = self.grid_from_latlon(lat, lon)
-            else:
-                grid = None
+    def gridinfo_from_arguments(self, lat, lon, construct_grid):
+        assert (
+            lat is not None
+        ), "If custom lon is given, custom lat must also be given."
+        assert (
+            lon is not None
+        ), "If custom lat is given, custom lon must also be given."
+        lat = self.coord_from_argument(lat)
+        lon = self.coord_from_argument(lon)
+        if construct_grid:
+            grid = self.grid_from_latlon(lat, lon)
+        else:
+            grid = None
         return lat, lon, grid
 
-    def _latlon_from_dataset(self, ds, construct_grid=True):
+    def _latlon_from_dataset(self, ds):
         lat = self.coord_from_dataset(ds, "lat")
         lon = self.coord_from_dataset(ds, "lon")
         return lat, lon
@@ -255,7 +249,7 @@ class XarrayReaderBase:
             )
             grid = grid.subgrid_from_gpis(bbox_gpis)
         num_gpis = len(grid.activegpis)
-        logging.debug(f"construct_grid: Number of active gpis: {num_gpis}")
+        logging.debug(f"finalize_grid: Number of active gpis: {num_gpis}")
 
         if hasattr(self, "cellsize") and self.cellsize is not None:
             grid = grid.to_cell_grid(cellsize=self.cellsize)

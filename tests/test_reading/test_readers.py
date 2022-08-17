@@ -19,432 +19,59 @@ from qa4sm_preprocessing.reading.utils import mkdate
 from pytest import test_data_path
 
 
-def validate_reader(reader, metadata=True):
+# ###############################################################################
+# # Images with and without time dimension
+# ###############################################################################
+
+
+# def test_image_time_dimension(test_output_path):
+#     # create test dataset with subdaily timestamps
+#     nlat, nlon, ntime = 5, 5, 20
+#     lat = np.linspace(0, 1, nlat)
+#     lon = np.linspace(0, 1, nlon)
+#     time = pd.date_range("2000", periods=ntime, freq="6H")
+
+#     X = np.ones((ntime, nlat, nlon), dtype=np.float32)
+#     X = (X.T * np.arange(ntime)).T
+
+#     ds = xr.Dataset(
+#         {"X": (["time", "lat", "lon"], X)},
+#         coords={"time": time, "lat": lat, "lon": lon},
+#     )
+
+#     def write_images(ds, outpath, image_with_time_dim):
+#         outpath = Path(outpath)
+#         outpath.mkdir(exist_ok=True, parents=True)
+#         for timestamp in ds.indexes["time"]:
+#             if image_with_time_dim:
+#                 img = ds.sel(time=slice(timestamp, timestamp))
+#             else:
+#                 img = ds.sel(time=timestamp)
+#             fname = timestamp.strftime("img_%Y%m%dT%H%M%S.nc")
+#             img.to_netcdf(outpath / fname)
+
+#     # Write images to netCDF files once with and once without time dimension,
+#     # and then try to read them with averaging
+#     for image_with_time_dim in [False, True]:
+#         outpath = (
+#             test_output_path / f"image_with_time_dim={image_with_time_dim}"
+#         )
+#         write_images(ds, outpath, image_with_time_dim)
+
+#         reader = DirectoryImageReader(
+#             outpath,
+#             varnames=["X"],
+#             fmt="img_%Y%m%dT%H%M%S.nc",
+#             average="daily",
+#         )
+#         assert reader.timestamps[0] < reader.timestamps[-1]
+#         for i, tstamp in enumerate(reader.timestamps):
+#             # assumes that ntime is a multiple of 4, otherwise edge cases can
+#             # occur
+#             expected = 1.5 + 4 * i
+#             img = reader.read_block(tstamp, tstamp)
+#             assert np.all(img.X.values == expected)
 
-    expected_timestamps = pd.date_range(
-        "2017-03-30 00:00", periods=6, freq="D"
-    ).to_pydatetime()
-    assert len(reader.timestamps) == 6
-    assert np.all(list(reader.timestamps) == expected_timestamps)
-
-    img = reader.read(expected_timestamps[0])
-    true = xr.open_dataset(
-        test_data_path
-        / "lis_noahmp"
-        / "201703"
-        / "LIS_HIST_201703300000.d01.nc"
-    )["SoilMoist_inst"].isel(SoilMoist_profiles=0)
-    np.testing.assert_allclose(img.data["SoilMoist_inst"], true.values.ravel())
-    if metadata:
-        true.attrs == img.metadata["SoilMoist_inst"]
-    else:
-        assert img.metadata["SoilMoist_inst"] == {}
-
-    img = reader.read(expected_timestamps[-1])
-    true = xr.open_dataset(
-        test_data_path
-        / "lis_noahmp"
-        / "201704"
-        / "LIS_HIST_201704040000.d01.nc"
-    )["SoilMoist_inst"].isel(SoilMoist_profiles=0)
-    np.testing.assert_allclose(img.data["SoilMoist_inst"], true.values.ravel())
-    if metadata:
-        true.attrs == img.metadata["SoilMoist_inst"]
-    else:
-        assert img.metadata["SoilMoist_inst"] == {}
-
-    # metadata for read_block
-    block = reader.read_block(expected_timestamps[0], expected_timestamps[0])
-    if metadata:
-        true = xr.open_dataset(
-            test_data_path
-            / "lis_noahmp"
-            / "201703"
-            / "LIS_HIST_201703300000.d01.nc"
-        )
-        assert true.attrs.keys() == block.attrs.keys()
-        assert all(
-            [np.all(block.attrs[key] == true.attrs[key]) for key in true.attrs]
-        )
-        assert (
-            true["SoilMoist_inst"].attrs.keys()
-            == block["SoilMoist_inst"].attrs.keys()
-        )
-        assert all(
-            [
-                np.all(
-                    block["SoilMoist_inst"].attrs[key]
-                    == true["SoilMoist_inst"].attrs[key]
-                )
-                for key in true["SoilMoist_inst"].attrs
-            ]
-        )
-    else:
-        assert block.attrs == {}
-        assert block["SoilMoist_inst"].attrs == {}
-
-
-###############################################################################
-# DirectoryImageReader
-###############################################################################
-
-# Optional features to test for DirectoryImageReader:
-# - [X] level
-#   - [X] with level: default_directory_reader
-#   - [-] without level: covered in XarrayImageStackReader tests
-# - [X] fmt: default_directory_reader
-# - [X] pattern: default_directory_reader
-# - [X] time_regex_pattern: test_time_regex
-# - [-] timename, latname, lonname: covered in XarrayImageStackReader tests
-# - [X] latdim, londim: default_directory_reader
-# - [-] locdim: covered in XarrayImageStackReader tests
-# - [-] landmask: covered in XarrayImageStackReader tests
-# - [-] bbox: covered in XarrayImageStackReader tests
-# - [-] cellsize None: covered in XarrayImageStackReader tests
-
-
-def test_directory_reader_setup():
-
-    # test "normal procedure", i.e. with given fmt
-    pattern = "LIS_HIST*.nc"
-    fmt = "LIS_HIST_%Y%m%d%H%M.d01.nc"
-
-    # the LIS_HIST files have dimensions north_south and east_west instead of
-    # lat/lon
-    start = time.time()
-    reader = DirectoryImageReader(
-        test_data_path / "lis_noahmp",
-        "SoilMoist_inst",
-        fmt=fmt,
-        pattern=pattern,
-        latdim="north_south",
-        londim="east_west",
-        level={"SoilMoist_profiles": 0},
-        lat=(29.875, 54.75, 0.25),
-        lon=(-11.375, 1.0, 0.25),
-    )
-    runtime = time.time() - start
-    print(f"Setup time with fmt string: {runtime:.2e}")
-    validate_reader(reader)
-
-    # test without fmt, requires opening all files
-    start = time.time()
-    reader = DirectoryImageReader(
-        test_data_path / "lis_noahmp",
-        "SoilMoist_inst",
-        pattern=pattern,
-        latdim="north_south",
-        londim="east_west",
-        level={"SoilMoist_profiles": 0},
-        lat=(29.875, 54.75, 0.25),
-        lon=(-11.375, 1.0, 0.25),
-    )
-    runtime2 = time.time() - start
-    print(f"Setup time without fmt string: {runtime2:.2e}")
-    validate_reader(reader)
-
-    assert runtime < runtime2
-
-
-def test_time_regex():
-    # test with using a regex for the time string
-    pattern = "LIS_HIST*.nc"
-    fmt = "%Y%m%d%H%M"
-    time_regex_pattern = r"LIS_HIST_(\d+)\..*\.nc"
-    reader = DirectoryImageReader(
-        test_data_path / "lis_noahmp",
-        "SoilMoist_inst",
-        fmt=fmt,
-        pattern=pattern,
-        time_regex_pattern=time_regex_pattern,
-        latdim="north_south",
-        londim="east_west",
-        level={"SoilMoist_profiles": 0},
-        lat=(29.875, 54.75, 0.25),
-        lon=(-11.375, 1.0, 0.25),
-    )
-    validate_reader(reader)
-
-
-def test_read_block(default_directory_reader):
-    block = default_directory_reader.read_block()
-    assert block["SoilMoist_inst"].shape == (6, 100, 50)
-
-    reader = XarrayImageStackReader(block, "SoilMoist_inst")
-    validate_reader(reader)
-
-    start_date = next(iter(default_directory_reader.timestamps))
-    block = default_directory_reader.read_block(
-        start=start_date, end=start_date
-    )["SoilMoist_inst"]
-    assert block.shape == (1, 100, 50)
-
-
-def test_no_metadata(default_directory_reader):
-    reader = default_directory_reader
-    reader.discard_attrs()
-    validate_reader(reader, metadata=False)
-
-
-###############################################################################
-# XarrayImageStackReader
-###############################################################################
-
-# Optional features to test for DirectoryImageReader:
-# - [X] level
-#   - [-] with level: covered in DirectoryImageReader tests
-#   - [X] without level: test_xarray_reader_basic
-# - [X] timename, latname, lonname: test_nonstandard_names
-# - [X] latdim, londim: covered in DirectoryImageReader tests
-# - [X] locdim: test_locdim
-# - [X] bbox, cellsize, landmask: test_landmask, test_bbox_cellsize
-
-
-def test_xarray_reader_basic(default_xarray_reader):
-    validate_reader(default_xarray_reader)
-
-
-def test_metadata(latlon_test_dataset):
-    reader = XarrayImageStackReader(latlon_test_dataset, "X")
-    block = reader.read_block()
-    assert block["X"].shape == (100, 10, 20)
-    assert block.attrs == {"description": "test dataset"}
-    assert block["X"].attrs == {"unit": "m", "long_name": "eks"}
-
-
-def test_nonstandard_names(latlon_test_dataset):
-    ds = latlon_test_dataset.rename({"time": "tim", "lat": "la", "lon": "lo"})
-    reader = XarrayImageStackReader(
-        ds, "X", timename="tim", latname="la", lonname="lo"
-    )
-    block = reader.read_block()["X"]
-    assert block.shape == (100, 10, 20)
-
-
-def test_unstructured(unstructured_test_dataset):
-    reader = XarrayImageStackReader(
-        unstructured_test_dataset,
-        "X",
-        locdim="location",
-        latname="lat",
-        lonname="lon",
-    )
-    block = reader.read_block()["X"]
-    assert block.shape == (100, 200)
-    assert list(block.coords) == ["time", "lat", "lon"]
-
-    img = reader.read(reader.timestamps[0])
-    assert img.data["X"].shape == (200,)
-    assert np.all(img.data["X"] == block.isel(time=0).values)
-
-
-def test_curvilinear(curvilinear_test_dataset):
-    reader = XarrayImageStackReader(
-        curvilinear_test_dataset,
-        "X",
-        latdim="y",
-        londim="x",
-        latname="lat",
-        lonname="lon",
-        curvilinear=True,
-    )
-    block = reader.read_block()["X"]
-    assert block.shape == (100, 10, 20)
-    assert list(block.coords) == ["time", "lat", "lon"]
-    assert list(block.dims) == ["time", "y", "x"]
-    assert block.lat.shape == (10, 20)
-    assert block.lon.shape == (10, 20)
-
-    img = reader.read(reader.timestamps[0])
-    assert img.data["X"].shape == (200,)
-    assert np.all(img.data["X"] == block.isel(time=0).values.ravel())
-
-
-def test_bbox_landmask_cellsize(cmip_ds):
-    """
-    Tests the bounding box feature
-    """
-    num_gpis = cmip_ds["mrsos"].isel(time=0).size
-
-    # normal reader without bbox or landmask
-    reader = XarrayImageStackReader(cmip_ds, "mrsos", cellsize=5.0)
-    assert len(reader.grid.activegpis) == num_gpis
-    assert len(np.unique(reader.grid.activearrcell)) == 100
-    block = reader.read_block()["mrsos"]
-    np.testing.assert_allclose(block.values, cmip_ds.mrsos.values)
-
-    # now with bbox
-    min_lon = 90
-    min_lat = 20
-    max_lon = 100
-    max_lat = 30
-    bbox = [min_lon, min_lat, max_lon, max_lat]
-    reader = XarrayImageStackReader(cmip_ds, "mrsos", bbox=bbox, cellsize=5.0)
-    num_gpis_box = len(reader.grid.activegpis)
-    assert num_gpis_box < num_gpis
-    assert len(np.unique(reader.grid.activearrcell)) == 4
-    assert not np.any(reader.grid.arrlon < min_lon)
-    assert not np.any(reader.grid.arrlat < min_lat)
-    assert not np.any(reader.grid.arrlon > max_lon)
-    assert not np.any(reader.grid.arrlat > max_lat)
-    block = reader.read_block()["mrsos"]
-    # the sel-slice notation only works with regular grids
-    europe_mrsos = cmip_ds.mrsos.sel(
-        lat=slice(min_lat, max_lat), lon=slice(min_lon, max_lon)
-    )
-    np.testing.assert_allclose(block.values, europe_mrsos.values)
-
-    # now additionally using a landmask
-    landmask = ~np.isnan(cmip_ds.mrsos.isel(time=0))
-    reader = XarrayImageStackReader(
-        cmip_ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
-    )
-    assert len(reader.grid.activegpis) < num_gpis
-    assert len(np.unique(reader.grid.activearrcell)) == 4
-    assert not np.any(reader.grid.arrlon < min_lon)
-    assert not np.any(reader.grid.arrlat < min_lat)
-    assert not np.any(reader.grid.arrlon > max_lon)
-    assert not np.any(reader.grid.arrlat > max_lat)
-    block = reader.read_block()["mrsos"]
-    # the sel-slice notation only works with regular grids
-    europe_mrsos = cmip_ds.mrsos.sel(
-        lat=slice(min_lat, max_lat), lon=slice(min_lon, max_lon)
-    )
-    np.testing.assert_allclose(block.values, europe_mrsos.values)
-
-    # with landmask as variable name
-    ds = cmip_ds
-    ds["landmask"] = landmask
-    reader = XarrayImageStackReader(
-        ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
-    )
-    assert len(reader.grid.activegpis) < num_gpis
-    assert len(np.unique(reader.grid.activearrcell)) == 4
-    assert not np.any(reader.grid.arrlon < min_lon)
-    assert not np.any(reader.grid.arrlat < min_lat)
-    assert not np.any(reader.grid.arrlon > max_lon)
-    assert not np.any(reader.grid.arrlat > max_lat)
-    new_block = reader.read_block()["mrsos"]
-    np.testing.assert_allclose(block.values, new_block.values)
-
-
-###############################################################################
-# XarrayTSReader
-###############################################################################
-
-
-def test_xarray_ts_reader(latlon_test_dataset):
-    reader = XarrayTSReader(latlon_test_dataset, "X")
-    _, lons, lats = reader.grid.get_grid_points()
-    for lon, lat in zip(lons, lats):
-        ts = reader.read(lon, lat)["X"]
-        ref = latlon_test_dataset.X.sel(lat=lat, lon=lon)
-        assert np.all(ts == ref)
-
-
-def test_xarray_ts_reader_locdim(unstructured_test_dataset):
-    reader = XarrayTSReader(unstructured_test_dataset, "X", locdim="location")
-    gpis, _, _ = reader.grid.get_grid_points()
-    for gpi in gpis:
-        ts = reader.read(gpi)["X"]
-        ref = unstructured_test_dataset.X.isel(location=gpi)
-        assert np.all(ts == ref)
-
-
-###############################################################################
-# Images with and without time dimension
-###############################################################################
-
-
-def test_image_time_dimension(test_output_path):
-    # create test dataset with subdaily timestamps
-    nlat, nlon, ntime = 5, 5, 20
-    lat = np.linspace(0, 1, nlat)
-    lon = np.linspace(0, 1, nlon)
-    time = pd.date_range("2000", periods=ntime, freq="6H")
-
-    X = np.ones((ntime, nlat, nlon), dtype=np.float32)
-    X = (X.T * np.arange(ntime)).T
-
-    ds = xr.Dataset(
-        {"X": (["time", "lat", "lon"], X)},
-        coords={"time": time, "lat": lat, "lon": lon},
-    )
-
-    def write_images(ds, outpath, image_with_time_dim):
-        outpath = Path(outpath)
-        outpath.mkdir(exist_ok=True, parents=True)
-        for timestamp in ds.indexes["time"]:
-            if image_with_time_dim:
-                img = ds.sel(time=slice(timestamp, timestamp))
-            else:
-                img = ds.sel(time=timestamp)
-            fname = timestamp.strftime("img_%Y%m%dT%H%M%S.nc")
-            img.to_netcdf(outpath / fname)
-
-    # Write images to netCDF files once with and once without time dimension,
-    # and then try to read them with averaging
-    for image_with_time_dim in [False, True]:
-        outpath = (
-            test_output_path / f"image_with_time_dim={image_with_time_dim}"
-        )
-        write_images(ds, outpath, image_with_time_dim)
-
-        reader = DirectoryImageReader(
-            outpath,
-            varnames=["X"],
-            fmt="img_%Y%m%dT%H%M%S.nc",
-            average="daily",
-        )
-        assert reader.timestamps[0] < reader.timestamps[-1]
-        for i, tstamp in enumerate(reader.timestamps):
-            # assumes that ntime is a multiple of 4, otherwise edge cases can
-            # occur
-            expected = 1.5 + 4 * i
-            img = reader.read_block(tstamp, tstamp)
-            assert np.all(img.X.values == expected)
-
-###############################################################################
-# Files with multiple timesteps
-###############################################################################
-
-
-def test_image_multiple_timesteps(test_output_path):
-    # create test dataset with subdaily timestamps
-    nlat, nlon, ntime = 5, 5, 20
-    lat = np.linspace(0, 1, nlat)
-    lon = np.linspace(0, 1, nlon)
-    time = pd.date_range("2000", periods=ntime, freq="6H")
-
-    X = np.ones((ntime, nlat, nlon), dtype=np.float32)
-    X = (X.T * np.arange(ntime)).T
-
-    ds = xr.Dataset(
-        {"X": (["time", "lat", "lon"], X)},
-        coords={"time": time, "lat": lat, "lon": lon},
-    )
-
-    # Write daily files containing 4 timesteps
-    outpath = (
-        test_output_path / f"multistep_images"
-    )
-    outpath.mkdir(exist_ok=True, parents=True)
-    days = pd.date_range(time[0], time[-1], freq="D")
-    for d in days:
-        img = ds.sel(time=slice(d, d + pd.Timedelta("23H")))
-        fname = d.strftime("img_%Y%m%d.nc")
-        img.to_netcdf(outpath / fname)
-
-    reader = DirectoryImageReader(
-        outpath,
-        varnames=["X"],
-        fmt="img_%Y%m%d.nc",
-        timestamps=[pd.Timedelta(f"{i}H") for i in [0, 6, 12, 18]]
-    )
-    assert np.all(reader.timestamps == time)
-    assert len(reader._file_tstamp_map) == ntime // 4
-    block = reader.read_block()
-    assert np.all(block.X.values == X)
 
 ###############################################################################
 # Full chain with time offset
@@ -473,6 +100,7 @@ def test_SMOS(test_output_path):
         cellsize_lat=5,
         cellsize_lon=5,
     )
+    reshuffler.orthogonal = True
     reshuffler.calc()
 
     ts_reader = GriddedNcOrthoMultiTs(

@@ -29,7 +29,7 @@ def test_output_path(tmpdir_factory):
 
 def make_regular_test_dataset():
     rng = np.random.default_rng(42)
-    nlat, nlon, ntime = 10, 20, 100
+    nlat, nlon, ntime = 5, 10, 20
     lat = np.linspace(0, 1, nlat)
     lon = np.linspace(0, 1, nlon)
     time = pd.date_range("2000", periods=ntime, freq="D")
@@ -56,7 +56,7 @@ def regular_test_dataset():
 
 def make_curvilinear_test_dataset():
     rng = np.random.default_rng(42)
-    nlat, nlon, ntime = 10, 20, 100
+    nlat, nlon, ntime = 5, 10, 20
     lat = np.linspace(0, 1, nlat)
     lon = np.linspace(0, 1, nlon)
     LON, LAT = np.meshgrid(lon, lat)
@@ -89,13 +89,15 @@ def make_unstructured_test_dataset():
     ds = (
         ds.drop_vars("location")
         .rename({"latitude": "lat", "longitude": "lon"})
-        .assign_coords({"lat": ("location", ds.lat), "lon": ("location", ds.lon)})
+        .assign_coords(
+            {"lat": ("location", ds.lat.values), "lon": ("location", ds.lon.values)}
+        )
     )
     return ds
 
 
 @pytest.fixture
-def unstructured_test_dataset(latlon_test_dataset):
+def unstructured_test_dataset():
     return make_unstructured_test_dataset()
 
 
@@ -139,10 +141,10 @@ def lis_noahmp_directory_image_reader():
 
 
 @pytest.fixture
-def lis_noahmp_stacked(default_directory_reader):
+def lis_noahmp_stacked(lis_noahmp_directory_image_reader):
     stack_path = pytest.test_data_path / "lis_noahmp_stacked.nc"
     if not stack_path.exists():
-        block = default_directory_reader.read_block()
+        block = lis_noahmp_directory_image_reader.read_block()
         block.to_netcdf(stack_path)
     return xr.open_dataset(stack_path)
 

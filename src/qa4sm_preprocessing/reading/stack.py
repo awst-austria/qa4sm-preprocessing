@@ -62,6 +62,10 @@ class XarrayImageStackReader(XarrayImageReaderBase):
     lon : tuple, optional (default: None)
         If the longitude can not be inferred from the dataset you can specify
         it by giving (start, stop, step).
+    construct_grid : bool, optional (default: True)
+        Whether to construct a BasicGrid instance. For very large datasets it
+        might be necessary to turn this off, because the grid requires too much
+        memory.
     curvilinear : bool, optional
         Whether the grid is curvilinear, i.e. is a 2D grid, but not a regular
         lat-lon grid. In this case, `latname` and `lonname` must be given, and
@@ -105,7 +109,6 @@ class XarrayImageStackReader(XarrayImageReaderBase):
         cellsize: float = None,
         use_dask: bool = False,
         curvilinear: bool = False,
-        grid: BasicGrid = None,
         construct_grid: bool = True,
     ):
 
@@ -130,7 +133,6 @@ class XarrayImageStackReader(XarrayImageReaderBase):
             bbox=bbox,
             cellsize=cellsize,
             curvilinear=curvilinear,
-            grid=grid,
             construct_grid=construct_grid,
         )
         self.data = ds

@@ -349,9 +349,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional (default: None)
         Spatial coverage of a single cell file in degrees.
-    grid : BasicGrid, optional (default: None)
-        If the grid cannot be inferred from the file, it can also be passed
-        directly.
     construct_grid : bool, optional (default: True)
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
@@ -399,7 +396,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        grid: BasicGrid = None,
         construct_grid: bool = True,
         average: str = None,
         timestamps: Sequence[pd.Timedelta] = None,
@@ -451,10 +447,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             bbox=bbox,
             cellsize=cellsize,
             curvilinear=curvilinear,
-            grid=grid,
             construct_grid=construct_grid,
         )
-
 
         #############################################################################
         # Time information
@@ -489,7 +483,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
 
         if discard_attrs:
             self.discard_attrs()
-
 
         # Done
         #############################################################################
@@ -571,7 +564,9 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
     @property
     def example_dataset(self) -> xr.Dataset:
         if not hasattr(self, "_example_dataset") or self._example_dataset is None:
-            self._example_dataset = self._make_nicer_ds(self._open_dataset(self._example_file))
+            self._example_dataset = self._make_nicer_ds(
+                self._open_dataset(self._example_file)
+            )
         return self._example_dataset
 
     def _calculate_averaging_timestamp(self, tstamp) -> datetime.datetime:
@@ -759,6 +754,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                 if l2name in l2names:
                     new_varnames.append(l2name)
                 else:
-                    warnings.warn(f"Skipping variable {l2name} because it does not exist")
+                    warnings.warn(
+                        f"Skipping variable '{l2name}' because it does not exist!"
+                    )
             varnames = new_varnames
         return varnames, rename, level

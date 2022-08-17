@@ -1,7 +1,8 @@
 import datetime
-from typing import Sequence
 from math import floor
 import numpy as np
+from typing import Sequence
+import xarray as xr
 
 
 def mkdate(datestring):
@@ -20,6 +21,20 @@ def str2bool(val):
         return True
     else:
         return False
+
+
+def nimages_for_memory(img: xr.Dataset, memory: float):
+    """
+    Infers the number of images that fits into memory.
+
+    Parameters
+    ----------
+    img : xr.Dataset
+    memory : float
+        Size of available memory in GB
+    """
+    imagesize = img.nbytes / 1024**3
+    return int(np.floor(memory / imagesize))
 
 
 def infer_chunksizes(dimsizes: Sequence, target_size: float, dtype) -> tuple:

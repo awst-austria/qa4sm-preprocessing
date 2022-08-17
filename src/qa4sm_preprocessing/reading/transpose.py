@@ -13,7 +13,7 @@ import xarray as xr
 import shutil
 import zarr
 
-from .utils import infer_chunksizes
+from .utils import infer_chunksizes, nimages_for_memory
 from .image import DirectoryImageReader
 
 
@@ -156,18 +156,18 @@ def _transpose(
     # have to calculate the image size for the variable with the largest dtype,
     # because this will limit the size
     maxdtypesize = 0
+    maxstepsize = 0
     for var in reader.varnames:
         maxdtypesize = max(maxdtypesize, testds[var].dtype.itemsize)
-    imagesize = np.prod(new_dimsizes[:-1]) * maxdtypesize / 1024**3  # in GB
-    if stepsize is None:
         # The available memory governs how many images we can read at once:
         # mem = imagesize * nvar * 3 * nsteps
         # The factor 3 is because we have to read the data and transpose it,
         # just to be safe we use a bit less memory than allowed.
-        stepsize = min(
-            int(memory / (imagesize * len(reader.varnames) * 3)),
-            len(reader.timestamps),
-        )
+        maxstepsize = nimages_for_memory(testds[var], memory) // 3
+    if stepsize is None:
+        stepsize = min(maxstepsize, len(reader.timestamps))
+    else:
+        stepsize = min(stepsize, maxstepsize, len(reader.timestamps))
     logging.info(f"write_transposed_dataset: Using {stepsize} images per step")
 
     # calculate chunk sizes if they are not given

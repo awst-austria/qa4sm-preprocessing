@@ -315,10 +315,12 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         The name of the time coordinate.
     latdim : str, optional (default: None)
         The name of the latitude dimension in case it's not the same as the
-        latitude coordinate variable.
+        latitude coordinate variable. For curvilinear grids it should be the
+        first dimension of the coordinate dimensions.
     londim : str, optional (default: None)
         The name of the longitude dimension in case it's not the same as the
-        longitude coordinate variable.
+        longitude coordinate variable. For curvilinear grids it should be the
+        first dimension of the coordinate dimensions.
     locdim : str, optional (default: None)
         The name of the location dimension for non-rectangular grids. If this
         is given, you *MUST* provide `lonname` and `latname`.

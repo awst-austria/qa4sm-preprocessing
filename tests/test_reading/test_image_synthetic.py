@@ -12,6 +12,7 @@
 # - [X] not all variables
 # - [X] renaming of variables
 # - [X] skipping missing variables
+# - [ ] skip missing with levels and rename
 # - [X] not reading files that don't match the pattern
 # - [X] using a regex pattern for getting the time information
 # - [X] extract a level (multiple options need to be tested)
@@ -134,6 +135,30 @@ def test_directory_image_reader_missing_varname(synthetic_test_args):
             ["X", "Y"],
             fmt="synthetic_%Y%m%dT%H%M.nc",
             skip_missing=True,
+            **kwargs
+        )
+    validate_reader(reader, ds)
+    shutil.rmtree(test_data_path / "synthetic")
+
+
+def test_directory_image_reader_missing_varname_level_rename(synthetic_test_args):
+    # tests whether skipping missing variables works
+    ds, kwargs = synthetic_test_args
+    ds = ds[["X"]]
+    new_ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
+    new_ds = new_ds.rename({"X": "newX"})
+    write_images(new_ds, test_data_path / "synthetic", "synthetic")
+    with pytest.warns(
+        UserWarning, match="Skipping variable 'Y' because it does not exist!"
+    ):
+        # skipping a variable raises a warning
+        reader = DirectoryImageReader(
+            test_data_path / "synthetic",
+            ["X", "Y"],
+            fmt="synthetic_%Y%m%dT%H%M.nc",
+            skip_missing=True,
+            rename={"newX_0": "X"},
+            level={"newX": {"level": 0}},
             **kwargs
         )
     validate_reader(reader, ds)
@@ -364,5 +389,68 @@ def test_directory_image_reader_multiple_timesteps_transposed(synthetic_test_arg
         **kwargs
     )
     ds = ds.transpose("time", ...)
+    validate_reader(reader, ds)
+    shutil.rmtree(test_data_path / "synthetic")
+
+
+def _write_multistep_files(ds, directory, drop_time=False):
+    directory.mkdir(exist_ok=True)
+    time = ds.indexes["time"]
+    if drop_time:
+        ds = ds.drop("time")
+    ds1 = ds.isel(time=slice(0, 4))
+    ds1.to_netcdf(directory / time[0].strftime("synthetic_%Y%m%d.nc"))
+    ds2 = ds.isel(time=slice(4, 8))
+    ds2.to_netcdf(directory / time[4].strftime("synthetic_%Y%m%d.nc"))
+
+
+def test_directory_image_reader_multiple_timesteps_subset(synthetic_test_args):
+    # here we test if it works to only read a subset of timesteps from files
+    # with multiple timesteps
+    ds, kwargs = synthetic_test_args
+    newtime = pd.date_range(
+        ds.indexes["time"][0], periods=len(ds.indexes["time"]), freq="6H"
+    )
+    ds = ds.assign_coords(time=newtime)
+    _write_multistep_files(ds, test_data_path / "synthetic")
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%d.nc",
+        timestamps=[
+            pd.Timedelta("0H"),
+            pd.Timedelta("6H"),
+            pd.Timedelta("12H"),
+            pd.Timedelta("18H"),
+        ],
+        **kwargs
+    )
+    ds = ds.isel(time=slice(0, 8))
+    validate_reader(reader, ds)
+    shutil.rmtree(test_data_path / "synthetic")
+
+
+def test_directory_image_reader_multiple_timesteps_subset_notime(synthetic_test_args):
+    # here we test if it works to only read a subset of timesteps from files
+    # with multiple timesteps
+    ds, kwargs = synthetic_test_args
+    newtime = pd.date_range(
+        ds.indexes["time"][0], periods=len(ds.indexes["time"]), freq="6H"
+    )
+    ds = ds.assign_coords(time=newtime)
+    _write_multistep_files(ds, test_data_path / "synthetic", drop_time=True)
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%d.nc",
+        timestamps=[
+            pd.Timedelta("0H"),
+            pd.Timedelta("6H"),
+            pd.Timedelta("12H"),
+            pd.Timedelta("18H"),
+        ],
+        **kwargs
+    )
+    ds = ds.isel(time=slice(0, 8))
     validate_reader(reader, ds)
     shutil.rmtree(test_data_path / "synthetic")

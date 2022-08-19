@@ -362,9 +362,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         relative to the base timestamp. For example, if each daily file
         contains a value for 6AM and 6PM, one could set this to
         ``[pd.Timedelta("6H"), pd.Timedelta("12H")]
-    use_dask : bool, optional (default: False)
-        Whether to open image files using dask. This might be useful in case
-        you run into memory issues.
     use_tqdm : bool, optional (default: True)
         Whether you want to have a nice progressbar.
     **open_dataset_kwargs : keyword arguments
@@ -399,7 +396,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         construct_grid: bool = True,
         average: str = None,
         timestamps: Sequence[pd.Timedelta] = None,
-        use_dask: bool = False,
         use_tqdm: bool = True,
         **open_dataset_kwargs,
     ):
@@ -408,7 +404,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # necessary for the setup of the parent class
         directory = Path(directory).expanduser().resolve()
         filepaths = sorted(glob.glob(str(directory / f"**/{pattern}"), recursive=True))
-        if not filepaths:
+        if not filepaths:  # pragma: no cover
             raise ReaderError(
                 f"No files matching pattern {pattern} in directory " f"{str(directory)}"
             )
@@ -416,17 +412,14 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
 
         # we also need the open_dataset kwargs, because they will be used to
         # open the example file
-        if use_dask and "chunks" not in open_dataset_kwargs:
-            open_dataset_kwargs["chunks"] = -1
-        else:
-            open_dataset_kwargs["chunks"] = None
         self.open_dataset_kwargs = open_dataset_kwargs.copy()
 
+        level = self.normalize_level(level, varnames)
         varnames, rename, level = self._fix_varnames_rename_level(
             varnames, rename, level, skip_missing
         )
         self.rename = rename
-        self.level = self.normalize_level(level, varnames)
+        self.level = level
         self.transpose = transpose
         self.average = average
         self.use_tqdm = use_tqdm
@@ -499,7 +492,9 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # can be overriden for custom datasets
         if fname == self._example_file:
             ds = self.example_dataset
-        else:
+        else:  # pragma: no cover
+            # Not tested because _open_datset(fname) is tested and this is not
+            # a typical use case.
             ds = self._open_dataset(fname)
         return super()._latlon_from_dataset(ds)
 
@@ -508,7 +503,9 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # can be overriden for custom datasets
         if fname == self._example_file:
             ds = self.example_dataset
-        else:
+        else:  # pragma: no cover
+            # Not tested because _open_datset(fname) is tested and this is not
+            # a typical use case.
             ds = self._open_dataset(fname)
         return super()._metadata_from_dataset(ds)
 
@@ -519,7 +516,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # can be overriden for custom datasets
         if fname == self._example_file:
             ds = self.example_dataset
-        else:
+        else:  # pragma: no cover
             ds = self._open_dataset(fname)
         return super()._landmask_from_dataset(ds, landmask)
 
@@ -736,6 +733,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                     ]
                 # Now we can remove the entries in rename that do not have a
                 # corresponding entry in namemapl1
+                import pdb; pdb.set_trace();
                 new_rename = rename.copy()
                 l1names = []
                 for file_var in namemapl1:

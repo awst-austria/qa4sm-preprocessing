@@ -86,9 +86,6 @@ class XarrayImageStackReader(XarrayImageReaderBase):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
-    use_dask: bool, optional
-        Whether to open image files using dask. This might be useful in case
-        you run into memory issues. Only used in case `ds` is only a pathname.
     """
 
     def __init__(
@@ -107,17 +104,12 @@ class XarrayImageStackReader(XarrayImageReaderBase):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        use_dask: bool = False,
         curvilinear: bool = False,
         construct_grid: bool = True,
     ):
 
         if isinstance(ds, (str, Path)):
-            if use_dask:
-                self.chunks = "auto"
-            else:
-                self.chunks = None
-            ds = xr.open_dataset(ds, chunks=self.chunks)
+            ds = xr.open_dataset(ds)
         super().__init__(
             ds,
             varnames,

@@ -124,7 +124,7 @@ def synthetic_test_args(request):
 
 @pytest.fixture
 def lis_noahmp_directory_image_reader():
-    pattern = "LIS_HIST*.nc"
+    pattern = "**/LIS_HIST*.nc"
     fmt = "LIS_HIST_%Y%m%d%H%M.d01.nc"
     reader = DirectoryImageReader(
         pytest.test_data_path / "lis_noahmp",

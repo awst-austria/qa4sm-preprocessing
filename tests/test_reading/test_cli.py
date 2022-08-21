@@ -21,7 +21,7 @@ def cli_args_lis(test_output_path):
         "2017-03-30",
         "2017-04-04",
         *("--parameter", "SoilMoist_inst"),
-        *("--pattern", "LIS_HIST*.nc"),
+        *("--pattern", "**/LIS_HIST*.nc"),
         *("--time_regex_pattern", r"LIS_HIST_(\d+)\..*\.nc"),
         *("--time_fmt", "%Y%m%d%H%M"),
         *("--latdim", "north_south"),

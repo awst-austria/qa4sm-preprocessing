@@ -72,7 +72,7 @@ def validate_reader(reader, metadata=True):
 def test_directory_reader_setup():
 
     # test "normal procedure", i.e. with given fmt
-    pattern = "LIS_HIST*.nc"
+    pattern = "**/LIS_HIST*.nc"
     fmt = "LIS_HIST_%Y%m%d%H%M.d01.nc"
 
     # the LIS_HIST files have dimensions north_south and east_west instead of

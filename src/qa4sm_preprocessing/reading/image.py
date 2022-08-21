@@ -39,6 +39,11 @@ The main routines that should be modified when subclassing are:
 * ``_landmask_from_dataset``: If a landmask is required (only if the ``read``
   function is used), and it cannot be read with ``_open_dataset`` and also not
   with other options. Should not be necessary very often.
+* ``_read_single_file``: normally this calls ``_open_dataset`` and then returns
+  the data as dictionary that maps from variable names to 3d data arrays (numpy
+  or dask). If it is hard to read the data as xr.Dataset, so that overriding
+  `_open_dataset` is not feasible, this could be overriden instead, but then
+  all the other routines for obtaining metadata also have to be overriden.
 
 In the following some examples for subclassing are provided.
 
@@ -294,7 +299,12 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         of a single index, .e.g. ``{"Y": {"level": [2, 3]}}``. In this case the
         resulting variables are named ``Y_2`` and ``Y_3``. Level selection is
         applied before renaming, so you can rename the ugly level names to
-        nicer ones.
+        nicer ones. If multiple levels are selected, e.g. ``{"Y": {"level1":
+        [0], "level2": [2, 3]}}``, the levels will be selected iteratively
+        starting from the left. In this example the resulting names would be
+        ``Y_0_2`` and ``Y_0_3``. These names can be specified in the `rename`
+        argument to give more descriptive names, e.g. ``rename={"Y_0_2": "Y2",
+        "Y_0_3": "Y3"}.
     skip_missing: bool, optional (default: False)
         Whether missing variables in the image files should be skipped or raise
         an error. Default is to raise an error.
@@ -414,7 +424,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # open the example file
         self.open_dataset_kwargs = open_dataset_kwargs.copy()
 
-        level = self.normalize_level(level, varnames)
         varnames, rename, level = self._fix_varnames_rename_level(
             varnames, rename, level, skip_missing
         )
@@ -512,7 +521,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
     def _landmask_from_dataset(
         self, fname: Union[Path, str], landmask: str
     ) -> xr.DataArray:
-        """Loads the landmask from a file"""
+        """Loads the landmask from an image file"""
         # can be overriden for custom datasets
         if fname == self._example_file:
             ds = self.example_dataset
@@ -610,6 +619,36 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                 block_dict[varname] = np.stack(block_dict[varname], axis=0)
         return block_dict
 
+    def _read_single_file(self, fname, tstamps) -> dict:
+        """
+        Reads a single file and returns a dictionary mapping variable names to
+        numpy arrays. Can be overriden in case it's easier to provide this
+        format than xarray datasets.
+        """
+        ds = self._make_nicer_ds(self._open_dataset(fname))
+        block_dict = {}
+        for varname in self.varnames:
+            arr = ds[varname]
+            if self.timename in arr.dims:
+                # if there are multiple timestamps in each file, reading is
+                # a bit more complicated. In the easiest case, we have as
+                # many timestamps as there are in the file, and we can just
+                # return it.
+                # Otherwise, if time is a coordinate, we can use
+                # .sel(tstamps). If this is also not the case, we need to
+                # find the indices of tstamps in the file
+                if len(tstamps) != len(arr[self.timename]):
+                    if self.timename in arr.coords:
+                        arr = arr.sel({self.timename: tstamps})
+                    else:
+                        all_tstamps = self._file_tstamp_map[fname]
+                        ids = [all_tstamps.index(ts) for ts in tstamps]
+                        arr = arr.isel({self.timename: ids})
+                block_dict[varname] = arr.data
+            else:
+                block_dict[varname] = arr.data[np.newaxis, ...]
+        return block_dict
+
     def _read_all_files(self, times, use_tqdm):
         # first we need to find all files that we have to visit, and remember
         # the timestamps that we need from this file
@@ -627,27 +666,9 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         if use_tqdm:
             iterator = tqdm(iterator)
         for fname, tstamps in iterator:
-            ds = self._make_nicer_ds(self._open_dataset(fname))
-            for varname in self.varnames:
-                arr = ds[varname]
-                if self.timename in arr.dims:
-                    # if there are multiple timestamps in each file, reading is
-                    # a bit more complicated. In the easiest case, we have as
-                    # many timestamps as there are in the file, and we can just
-                    # return it.
-                    # Otherwise, if time is a coordinate, we can use
-                    # .sel(tstamps). If this is also not the case, we need to
-                    # find the indices of tstamps in the file
-                    if len(tstamps) != len(arr[self.timename]):
-                        if self.timename in arr.coords:
-                            arr = arr.sel({self.timename: tstamps})
-                        else:
-                            all_tstamps = self._file_tstamp_map[fname]
-                            ids = [all_tstamps.index(ts) for ts in tstamps]
-                            arr = arr.isel({self.timename: ids})
-                    block_dict[varname].append(arr.data)
-                else:
-                    block_dict[varname].append(arr.data[np.newaxis, ...])
+            _blockdict = self._read_single_file(fname, tstamps)
+            for varname in block_dict:
+                block_dict[varname].append(_blockdict[varname])
         for varname in self.varnames:
             block_dict[varname] = np.vstack(block_dict[varname])
         return block_dict
@@ -687,6 +708,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # in the file)
         if isinstance(varnames, str):
             varnames = [varnames]
+        level = self.normalize_level(level, varnames)
         if skip_missing:
             # Be careful: skip_missing only works if _open_dataset does not do
             # any selection of varnames, renaming, or selection of levels.
@@ -733,7 +755,6 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                     ]
                 # Now we can remove the entries in rename that do not have a
                 # corresponding entry in namemapl1
-                import pdb; pdb.set_trace();
                 new_rename = rename.copy()
                 l1names = []
                 for file_var in namemapl1:

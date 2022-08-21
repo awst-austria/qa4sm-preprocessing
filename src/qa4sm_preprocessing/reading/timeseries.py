@@ -99,23 +99,23 @@ class XarrayTSReader(XarrayReaderBase):
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds)
 
-        # rechunk to good chunks for reading
-        _latdim = latdim if latdim is not None else latname
-        _londim = londim if londim is not None else lonname
-        # with this construct I make sure that I select lat, lon, and time
-        # in the right order
-        ds_dims = dict(ds.dims)
-        img_dims = ds[varnames[0]].dims
-        dims = {}
-        for dim in img_dims:
-            if dim in [_latdim, _londim, locdim, timename]:
-                dims[dim] = ds_dims[dim]
-        shape = tuple(dims.values())
-        chunks = infer_chunksizes(shape, 100, np.float32)
-        ds = ds.chunk(dict(zip(list(dims), chunks)))
+        # # rechunk to good chunks for reading
+        # _latdim = latdim if latdim is not None else latname
+        # _londim = londim if londim is not None else lonname
+        # # with this construct I make sure that I select lat, lon, and time
+        # # in the right order
+        # ds_dims = dict(ds.dims)
+        # img_dims = ds[varnames[0]].dims
+        # dims = {}
+        # for dim in img_dims:
+        #     if dim in [_latdim, _londim, locdim, timename]:
+        #         dims[dim] = ds_dims[dim]
+        # shape = tuple(dims.values())
+        # chunks = infer_chunksizes(shape, 100, np.float32)
+        # ds = ds.chunk(dict(zip(list(dims), chunks)))
 
-        if list(dims)[-1] != timename:
-            warnings.warn("Time should be the last dimension!")
+        # if list(dims)[-1] != timename:
+        #     warnings.warn("Time should be the last dimension!")
 
         super().__init__(
             ds,

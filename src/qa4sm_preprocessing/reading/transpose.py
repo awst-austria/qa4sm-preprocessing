@@ -218,7 +218,7 @@ def _transpose(
 
     # check if target chunk sizes are not too big
     chunksizes = list(chunks.values())
-    if np.prod(chunksizes) * s > 100:
+    if np.prod(chunksizes) * s > 100:  # pragma: no cover
         logging.warn("The specified chunksizes will lead to chunks larger than 100MB!")
 
     # create zarr arrays

@@ -61,9 +61,10 @@ class XarrayReaderBase:
             or latname is None
             or lonname is None
             or locdim is not None
-        ):
+        ):  # pragma: no cover
             raise ReaderError(
-                "For curvilinear grids, lat/lon-dim and lat/lon-name must " "be given."
+                "For curvilinear grids, lat/lon-dim and lat/lon-name must"
+                " be given."
             )
         if locdim is not None and (
             latname is None or lonname is None
@@ -89,7 +90,7 @@ class XarrayReaderBase:
                 fname, vname = landmask.split(":")
                 self.landmask = xr.open_dataset(fname)[vname]
             else:
-                self.landmask = self._get_landmask(ds, landmask)
+                self.landmask = self._landmask_from_dataset(ds, landmask)
         else:
             self.landmask = landmask
 
@@ -121,18 +122,18 @@ class XarrayReaderBase:
         # The grid can either be inferred from the arguments passed, or from
         # the first file in the dataset
         if lat is not None or lon is not None:
-            lat, lon, grid = self.gridinfo_from_arguments(
-                lat, lon, construct_grid
+            lat, lon = self._latlon_from_arguments(
+                lat, lon
             )
         else:
             lat, lon = self._latlon_from_dataset(ds)
-            if construct_grid:
-                grid = self.grid_from_latlon(lat, lon)
-            else:
-                grid = None
+        if construct_grid:
+            grid = self.grid_from_latlon(lat, lon)
+        else:
+            grid = None
         return lat, lon, grid
 
-    def gridinfo_from_arguments(self, lat, lon, construct_grid):
+    def _latlon_from_arguments(self, lat, lon):
         assert (
             lat is not None
         ), "If custom lon is given, custom lat must also be given."
@@ -141,11 +142,7 @@ class XarrayReaderBase:
         ), "If custom lat is given, custom lon must also be given."
         lat = self.coord_from_argument(lat)
         lon = self.coord_from_argument(lon)
-        if construct_grid:
-            grid = self.grid_from_latlon(lat, lon)
-        else:
-            grid = None
-        return lat, lon, grid
+        return lat, lon
 
     def _latlon_from_dataset(self, ds):
         lat = self.coord_from_dataset(ds, "lat")
@@ -159,7 +156,7 @@ class XarrayReaderBase:
         elif isinstance(coord, (list, tuple)) and len(coord) == 3:
             start, stop, step = coord
             return np.round(np.arange(start, stop, step), 5)
-        else:
+        else:  # pragma: no cover
             raise ReaderError(f"Wrong specification of argument: {coord}")
 
     def coord_from_dataset(self, ds, coordname):
@@ -216,7 +213,7 @@ class XarrayReaderBase:
             grid = BasicGrid(lon.ravel(), lat.ravel())
         elif self.gridtype == "unstructured":
             grid = BasicGrid(lon, lat)
-        else:
+        else:  # pragma: no cover
             raise ReaderError(
                 "gridtype must be 'regular', 'curvilinear', or 'unstructured'"
             )
@@ -228,12 +225,7 @@ class XarrayReaderBase:
         """
 
         if hasattr(self, "landmask") and self.landmask is not None:
-            if self.gridtype != "unstructured":
-                landmask = self.landmask.stack(
-                    dimensions={"loc": (self.latname, self.lonname)}
-                )
-            else:
-                landmask = self.landmask
+            landmask = self._stack(self.landmask)
             land_gpis = grid.get_grid_points()[0][landmask]
             grid = grid.subgrid_from_gpis(land_gpis)
 
@@ -258,6 +250,19 @@ class XarrayReaderBase:
 
         return grid
 
+    def _stack(self, img):
+        if self.gridtype != "unstructured":
+            if self.gridtype == "regular":
+                latname = self.latname
+                lonname = self.lonname
+            else:   # self.gridtype == "curvilinear"
+                latname = self.latdim
+                lonname = self.londim
+            img = img.stack(
+                dimensions={"loc": (latname, lonname)}
+            )
+        return img
+
 
 class LevelSelectionMixin:
     def normalize_level(self, level, varnames):
@@ -278,12 +283,9 @@ class LevelSelectionMixin:
                 variable_levels = self.__class__._select_levels_iteratively(
                     varname, ds[varname], self.level[varname]
                 )
-                if len(variable_levels) == 1:
-                    ds[varname] = variable_levels[0][1]
-                else:
-                    del ds[varname]
-                    for name, arr in variable_levels:
-                        ds[name] = arr
+                del ds[varname]
+                for name, arr in variable_levels:
+                    ds[name] = arr
         return ds
 
     @staticmethod
@@ -293,18 +295,22 @@ class LevelSelectionMixin:
         for levelname, idx in leveldict.items():
             if levelname not in arr.dims:
                 warnings.warn(
-                    f"Selection from level {levelname} requested, but"
-                    f" {levelname} is not an array dimension. Existing"
+                    f"Selection from level '{levelname}' requested, but"
+                    f" '{levelname}' is not an array dimension. Existing"
                     f" dimensions are {arr.dims}."
                 )
                 continue
-            if not isinstance(idx, list):
+            is_list = isinstance(idx, list)
+            if not is_list:
                 idx = [idx]
             tmp_list = []
             for name, arr in output_list:
                 for i in idx:
                     tmparr = arr.isel({levelname: i})
-                    tmpname = name + "_" + str(i)
+                    if is_list:
+                        tmpname = name + "_" + str(i)
+                    else:
+                        tmpname = name
                     tmp_list.append((tmpname, tmparr))
             output_list = tmp_list
         return output_list
@@ -500,20 +506,13 @@ class XarrayImageReaderBase(XarrayReaderBase):
         if isinstance(timestamp, str):
             timestamp = mkdate(timestamp)
 
-        if timestamp not in self.timestamps:
+        if timestamp not in self.timestamps:  # pragma: no cover
             raise ReaderError(f"Timestamp {timestamp} is not available in the dataset!")
 
         img = self.read_block(timestamp, timestamp, _apply_landmask_bbox=False).isel(
             {self.timename: 0}
         )
-        if self.gridtype != "unstructured":
-            if self.gridtype == "regular":
-                latname = self.latname
-                lonname = self.lonname
-            elif self.gridtype == "curvilinear":
-                latname = self.latdim
-                lonname = self.londim
-            img = img.stack(dimensions={"loc": (latname, lonname)})
+        img = self._stack(img)
         data = {
             varname: img[varname].values[self.grid.activegpis]
             for varname in self.varnames

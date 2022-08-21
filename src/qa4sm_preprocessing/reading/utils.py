@@ -16,7 +16,7 @@ def mkdate(datestring):
         raise ValueError(f"Invalid date: {datestring}")
 
 
-def str2bool(val):
+def str2bool(val):  # pragma: no cover
     if val in ["True", "true", "t", "T", "1", "yes", "y"]:
         return True
     else:

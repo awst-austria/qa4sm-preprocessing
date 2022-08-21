@@ -121,6 +121,24 @@ def test_directory_image_reader_renaming(synthetic_test_args):
     shutil.rmtree(test_data_path / "synthetic")
 
 
+def test_directory_image_reader_renaming_level(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    new_ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
+    new_ds = new_ds.rename({"X": "newX", "Y": "newY"})
+    write_images(new_ds, test_data_path / "synthetic", "synthetic")
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%dT%H%M.nc",
+        rename={"newX": "X", "newY_0": "Y"},
+        # testing selecting single level ("0") and multiple levels ("[0]")
+        level={"newX": {"level": 0}, "newY": {"level": [0]}},
+        **kwargs
+    )
+    validate_reader(reader, ds)
+    shutil.rmtree(test_data_path / "synthetic")
+
+
 def test_directory_image_reader_missing_varname(synthetic_test_args):
     # tests whether skipping missing variables works
     ds, kwargs = synthetic_test_args
@@ -157,8 +175,8 @@ def test_directory_image_reader_missing_varname_level_rename(synthetic_test_args
             ["X", "Y"],
             fmt="synthetic_%Y%m%dT%H%M.nc",
             skip_missing=True,
-            rename={"newX_0": "X"},
-            level={"newX": {"level": 0}},
+            rename={"newX_0": "X", "newY": "Y"},
+            level={"newX": {"level": [0]}, "newY": {"level": 0}},
             **kwargs
         )
     validate_reader(reader, ds)
@@ -304,6 +322,58 @@ def test_directory_image_reader_latlon_from_array(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds)
+    shutil.rmtree(test_data_path / "synthetic")
+
+
+def test_directory_image_reader_latlon_from_2d(regular_test_dataset):
+    ds = regular_test_dataset
+    orig_ds = ds.copy()
+    LON, LAT = np.meshgrid(ds.lon, ds.lat)
+    ds["LAT"] = (["lat", "lon"], LAT)
+    ds["LON"] = (["lat", "lon"], LON)
+    ds = ds.drop(["lat", "lon"])
+    write_images(ds, test_data_path / "synthetic", "synthetic")
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%dT%H%M.nc",
+        latname="LAT",
+        latdim="lat",
+        lonname="LON",
+        londim="lon",
+    )
+    validate_reader(reader, orig_ds)
+    shutil.rmtree(test_data_path / "synthetic")
+
+
+def test_directory_image_reader_landmask(synthetic_test_args):
+    # tests whether replacing fill values with NaN works
+    ds, kwargs = synthetic_test_args
+    ds["landmask"] = ds.X.isel(time=0) > -0.5
+    ds["X"] = ds.X.where(ds.landmask)
+    ds["Y"] = ds.X.where(ds.landmask)
+    write_images(ds, test_data_path / "synthetic", "synthetic")
+
+    # test with array as landmask
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%dT%H%M.nc",
+        landmask=ds["landmask"],
+        **kwargs
+    )
+    validate_reader(reader, ds[["X", "Y"]])
+
+    # test with string as landmask
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%dT%H%M.nc",
+        landmask="landmask",
+        **kwargs
+    )
+    validate_reader(reader, ds[["X", "Y"]])
+
     shutil.rmtree(test_data_path / "synthetic")
 
 

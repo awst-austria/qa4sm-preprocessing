@@ -76,10 +76,11 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         self.add_argument(
             "--pattern",
             type=str,
-            default="*.nc",
+            default="**/*.nc",
             help=(
                 "If DATASET_ROOT is a directory, glob pattern to match files"
-                " Default is '*.nc'"
+                " Default is '**/*.nc' (all files ending with .nc without"
+                " restriction of directory depth)."
             ),
         )
         self.add_argument(

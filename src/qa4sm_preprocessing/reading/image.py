@@ -145,7 +145,7 @@ grid). A reader could look like this::
                 "SMAP_L3_SM",
                 fmt="%Y%m%d",
                 time_regex_pattern=r"SMAP_L3_SM_P_([0-9]+)_R.*.h5",
-                pattern="*.h5",
+                pattern="**/*.h5",
                 use_tqdm=True,   # for nice progress bar
                 #
                 timestamps=[pd.Timedelta("6H"), pd.Timedelta("18H")]
@@ -255,8 +255,10 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         If such a simple pattern does not work for you, you can additionally
         specify `time_regex_pattern` (see below).
         `fmt` should only be used if the files only contain a single image.
-    pattern : str, optional (default: "*.nc")
-        Glob pattern to find all files to use.
+    pattern : str, optional (default: "**/*.nc")
+        Glob pattern to find all files to use. If all directories should be
+        search recursively, the pattern should start with "**/", similar to the
+        default pattern ("**/*.nc", looks for all paths that end with ".nc".
     time_regex_pattern : str, optional (default: None)
         A regex pattern to extract the part of the filename that contains the
         time information. It must contain a statement in parentheses that is
@@ -373,7 +375,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         directory: Union[Path, str],
         varnames: Union[str, Sequence],
         fmt: str = None,
-        pattern: str = "*.nc",
+        pattern: str = "**/*.nc",
         time_regex_pattern: str = None,
         rename: dict = None,
         transpose: Sequence = None,
@@ -403,10 +405,13 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # Before we do anything we have to assemble the files, because they are
         # necessary for the setup of the parent class
         directory = Path(directory).expanduser().resolve()
-        filepaths = sorted(glob.glob(str(directory / f"**/{pattern}"), recursive=True))
+        if not directory.exists():
+            raise ReaderError(f"Directory does not exist: {str(directory)}")
+        filepaths = sorted(glob.glob(str(directory / pattern), recursive=True))
         if not filepaths:  # pragma: no cover
             raise ReaderError(
-                f"No files matching pattern {pattern} in directory " f"{str(directory)}"
+                f"No files matching pattern {pattern} in directory "
+                f"{str(directory)}."
             )
         self._example_file = filepaths[0]
 

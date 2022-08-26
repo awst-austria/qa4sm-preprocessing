@@ -14,7 +14,6 @@ import shutil
 import zarr
 
 from .utils import infer_chunksizes, nimages_for_memory
-from .image import DirectoryImageReader
 
 
 Reader = TypeVar("Reader")
@@ -140,11 +139,7 @@ def _transpose(
 
     # figure out coordinates and dimensions based on test image
     # for reading the test image, disable tqdm
-    if hasattr(reader, "use_tqdm"):
-        reader.use_tqdm = False
-    testds = reader.read_block(timestamps[0], timestamps[0])
-    if hasattr(reader, "use_tqdm"):
-        reader.use_tqdm = new_tqdm
+    testds = reader._testimg()
     coords = dict(testds.coords)
     coords[reader.timename] = timestamps
     dims = dict(testds.dims)
@@ -197,9 +192,9 @@ def _transpose(
     # - chunks shouldn't be larger than 100MB
     # - chunks should only be so large that 2 chunks of full timeseries length
     #   fit into memory
-    # Let n1 be the chunk size of the first dimension, 'no' be the product of the
-    # chunksizes except the first and last (time), nt the number of timesteps,
-    # and ns the stepsize, and s the dtypesize. Then we have:
+    # Let n1 be the chunk size of the first dimension, 'no' be the product of
+    # the chunksizes except the first and last (time), nt the number of
+    # timesteps, and ns the stepsize, and s the dtypesize. Then we have:
     # - n1a * no * ns <= 100MB / s <=> n1a = 100MB / (s * no * ns)
     # - n1b * no * nt * 2 <= memory / s  <=> n1b = memory / (2 * no * nt * s)
 
@@ -219,7 +214,9 @@ def _transpose(
     # check if target chunk sizes are not too big
     chunksizes = list(chunks.values())
     if np.prod(chunksizes) * s > 100:  # pragma: no cover
-        logging.warn("The specified chunksizes will lead to chunks larger than 100MB!")
+        logging.warn(
+            "The specified chunksizes will lead to chunks larger than 100MB!"
+        )
 
     # create zarr arrays
     tmp_stores = {}
@@ -227,7 +224,9 @@ def _transpose(
     for var in reader.varnames:
         tmp_fnames[var] = outfname + "." + var + ".tmp.zarr"
         dtype = testds[var].dtype
-        default_fill_value = -9999 if np.issubdtype(np.int32, np.integer) else np.nan
+        default_fill_value = (
+            -9999 if np.issubdtype(np.int32, np.integer) else np.nan
+        )
         fill_value = testds[var].attrs.get("_FillValue", default_fill_value)
         tmp_stores[var] = zarr.create(
             new_dimsizes,
@@ -245,7 +244,9 @@ def _transpose(
         pbar.set_description("Reading")
         end_idx = min(start_idx + stepsize - 1, len(timestamps) - 1)
 
-        block = reader.read_block(timestamps[start_idx], timestamps[end_idx]).compute()
+        block = reader.read_block(
+            timestamps[start_idx], timestamps[end_idx]
+        ).compute()
         block = block.transpose(..., reader.timename)
         pbar.set_description("Writing")
         for var in reader.varnames:
@@ -275,7 +276,9 @@ def _transpose(
     ds.attrs.update(reader.global_attrs)
 
     # Now we can write the dataset
-    logging.info(f"write_transposed_dataset: Writing combined file to {str(outfname)}")
+    logging.info(
+        f"write_transposed_dataset: Writing combined file to {str(outfname)}"
+    )
     if outfname.endswith(".zarr"):
         ds.to_zarr(outfname, mode="w", consolidated=True)
     else:
@@ -285,7 +288,9 @@ def _transpose(
     if hasattr(reader, "use_tqdm"):
         reader.use_tqdm = orig_tqdm
     if hasattr(reader, "open_dataset_kwargs"):
-        reader.open_dataset_kwargs.update({"cache": orig_cache, "chunks": orig_chunks})
+        reader.open_dataset_kwargs.update(
+            {"cache": orig_cache, "chunks": orig_chunks}
+        )
 
     for fname in tmp_fnames.values():
         shutil.rmtree(fname)

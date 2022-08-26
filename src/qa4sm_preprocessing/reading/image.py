@@ -28,14 +28,14 @@ when it makes sense to subclass the reader to adapt certain parts.
 
 The main routines that should be modified when subclassing are:
 
-* ``_open_dataset``: basic routine for reading data from a file and returning it
-  as xr.Dataset
+* ``_open_dataset``: basic routine for reading data from a file and returning
+  it as xr.Dataset
 * ``_latlon_from_dataset``: For manual adaption of how the grid is generated if
   it cannot be inferred directly from the file.
 * ``_metadata_from_dataset``: If metadata cannot be read from the files.
-* ``_tstamps_in_file``: If the timestamp cannot be inferred from the filename but
-  via other info specific to the dataset this can be used to avoid having to
-  reading all files only to get the timestamps.
+* ``_tstamps_in_file``: If the timestamp cannot be inferred from the filename
+  but via other info specific to the dataset this can be used to avoid having
+  to reading all files only to get the timestamps.
 * ``_landmask_from_dataset``: If a landmask is required (only if the ``read``
   function is used), and it cannot be read with ``_open_dataset`` and also not
   with other options. Should not be necessary very often.
@@ -85,8 +85,8 @@ Subclassing for additional preprocessing
 ----------------------------------------
 
 It is often necessary to preprocess the data before using it. For example, many
-datasets contain quality flags as additional variable that need to be applied to
-mask out unreliable data. Another example would be a case where one is
+datasets contain quality flags as additional variable that need to be applied
+to mask out unreliable data. Another example would be a case where one is
 interested in a sum of multiple variables.  In this case it is necessary to
 override the ``_open_dataset`` method.
 
@@ -186,9 +186,9 @@ grid). A reader could look like this::
                 lon = self.coord_from_2d(g["longitude"], 1, fill_value=-9999)
             return lat, lon
 
-In this example we also adapted ``_latlon_from_dataset``. Instead, we could have
-just read the latitude and longitude in ``_open_dataset`` and added them as
-coordinates to the ``xr.Dataset``, but this way we don't have to read the
+In this example we also adapted ``_latlon_from_dataset``. Instead, we could
+have just read the latitude and longitude in ``_open_dataset`` and added them
+as coordinates to the ``xr.Dataset``, but this way we don't have to read the
 latitude and longitude arrays every time we open a file.
 
 More advanced cases
@@ -201,9 +201,9 @@ don't contain timestamps, it might be necessary to also override
 detail here, but it works similarly to the other examples.
 """
 
+import cftime
 import dask
 import datetime
-import logging
 import numpy as np
 import glob
 from pathlib import Path
@@ -214,9 +214,8 @@ from typing import Union, Iterable, Sequence, Dict, Tuple, List
 import warnings
 import xarray as xr
 
-from pygeogrids.grids import BasicGrid
-
-from .base import XarrayImageReaderBase, LevelSelectionMixin
+from .imagebase import XarrayImageReaderBase
+from .base import LevelSelectionMixin
 from .exceptions import ReaderError
 
 
@@ -231,10 +230,11 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
     ``write_transposed_dataset``), or a cell-based timeseries dataset (via the
     repurpose package).
 
-    The advantage over ``xr.open_mfdataset`` is that the reader typically does not
-    need to open each dataset to get information on coordinates. Instead, the
-    reader infers timestamps from the filenames via pattern matching, and infers
-    grid information from the first file in the dataset (earliest timestamp).
+    The advantage over ``xr.open_mfdataset`` is that the reader typically does
+    not need to open each dataset to get information on coordinates. Instead,
+    the reader infers timestamps from the filenames via pattern matching, and
+    infers grid information from the first file in the dataset (earliest
+    timestamp).
 
     It also handles situations in which multiple timestamps are in each "image"
     file (which isn't really an image file anymore in this case), and is able
@@ -256,10 +256,10 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         efficient).
         This must not contain any wildcards, only the format specifiers
         from ``datetime.datetime.strptime`` (e.g. %Y for year, %m for month, %d
-        for day, %H for hours, %M for minutes, ...).
-        If such a simple pattern does not work for you, you can additionally
-        specify `time_regex_pattern` (see below).
-        `fmt` should only be used if the files only contain a single image.
+        for day, %H for hours, %M for minutes, ...).  If such a simple pattern
+        does not work for you, you can additionally specify
+        `time_regex_pattern` (see below).  `fmt` should only be used if the
+        files only contain a single image.
     pattern : str, optional (default: "**/*.nc")
         Glob pattern to find all files to use. If all directories should be
         search recursively, the pattern should start with "**/", similar to the
@@ -282,6 +282,17 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         Dictionary to use to rename variables in the file. This is applied
         after level selection but before anything else, so all other parameters
         referring to variable names except 'level' should use the new names.
+    timeoffset : tuple, optional (default: None)
+        Sometimes an image is not really an image (i.e. a snapshot at a fixed
+        time), but is composed of multiple observations at different times
+        (e.g. satellite overpasses). In these cases, image files often contain
+        a time offset variable, that gives the exact observation time.
+        In this case, `timeoffset` can be set to a tuple of ``(<varname>,
+        <unit>)``.  <unit> can be "days", "hours", "minutes", "seconds", if
+        it is an offset to the image timestamp, or of the form "<unit> since
+        YYYY-MM-DD" if all offset images have the same base time.
+        Time offset is calculated after applying `rename`, so <varname> should
+        be the renamed variable name.
     transpose: list, optional (default: None)
         By default, we assume that the order of coordinates is "time", "lat",
         "lon" (if all are present and on regular grids). If the time dimension
@@ -388,6 +399,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         pattern: str = "**/*.nc",
         time_regex_pattern: str = None,
         rename: dict = None,
+        timeoffset: Tuple[str,str] = None,
+        timeoffsetformat: str = "days since 1900-01-01",
         transpose: Sequence = None,
         level: dict = None,
         skip_missing: bool = False,
@@ -399,8 +412,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         latdim: str = None,
         londim: str = None,
         locdim: str = None,
-        lat: Union[tuple, np.ndarray] = None,
-        lon: Union[tuple, np.ndarray] = None,
+        lat: np.ndarray = None,
+        lon: np.ndarray = None,
         curvilinear: bool = False,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
@@ -424,14 +437,21 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                 f"{str(directory)}."
             )
         self._example_file = filepaths[0]
+        self.fmt = fmt
+        if time_regex_pattern is not None:
+            self.time_regex_pattern = re.compile(time_regex_pattern)
+        else:
+            self.time_regex_pattern = None
 
         # we also need the open_dataset kwargs, because they will be used to
         # open the example file
         self.open_dataset_kwargs = open_dataset_kwargs.copy()
 
         varnames, rename, level = self._fix_varnames_rename_level(
-            varnames, rename, level, skip_missing
+            varnames, timeoffset, rename, level, skip_missing
         )
+        self.timeoffset = timeoffset
+        self.timeoffsetformat = timeoffsetformat
         self.rename = rename
         self.level = level
         self.transpose = transpose
@@ -457,14 +477,15 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             construct_grid=construct_grid,
         )
 
-        #############################################################################
+        ######################################################################
         # Time information
 
-        # The next step is to create a map that links filepaths to available timestamps
-        if time_regex_pattern is not None:
-            time_regex_pattern = re.compile(time_regex_pattern)
+        # The next step is to create a map that links filepaths to available
+        # timestamps
         self._file_tstamp_map = {
-            path: self._tstamps_in_file(path, fmt, time_regex_pattern, timestamps)
+            path: self._tstamps_in_file(
+                path, timestamps=timestamps
+            )
             for path in filepaths
         }
         # tstamp_file_map maps each timestamp to the file where it can be found
@@ -492,7 +513,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             self.discard_attrs()
 
         # Done
-        #############################################################################
+        ######################################################################
 
     def _open_dataset(self, fname: Union[Path, str]) -> xr.Dataset:
         """Returns data from file as xr.Dataset"""
@@ -512,7 +533,9 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             ds = self._open_dataset(fname)
         return super()._latlon_from_dataset(ds)
 
-    def _metadata_from_dataset(self, fname: Union[Path, str]) -> Tuple[Dict, Dict]:
+    def _metadata_from_dataset(
+        self, fname: Union[Path, str]
+    ) -> Tuple[Dict, Dict]:
         """Loads the metadata from a file"""
         # can be overriden for custom datasets
         if fname == self._example_file:
@@ -537,26 +560,25 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
     def _tstamps_in_file(
         self,
         path: Union[Path, str],
-        fmt: str,
-        time_regex_pattern: str,
-        timestamps: Sequence,
+        timestamps: Sequence = None,
     ) -> List[datetime.datetime]:
         """
         Creates a list of available timestamps in the files.
         """
         # can be overriden for custom datasets
-        if fmt is not None:
+        if self.fmt is not None:
             fname = Path(path).name
-            if time_regex_pattern is not None:
-                match = time_regex_pattern.findall(fname)
+            if self.time_regex_pattern is not None:
+                match = self.time_regex_pattern.findall(fname)
                 if not match:  # pragma: no cover
                     raise ReaderError(
-                        f"Pattern {time_regex_pattern} did not match " f"{fname}"
+                        f"Pattern {self.time_regex_pattern} did not match "
+                        f"{fname}"
                     )
                 timestring = match[0]
             else:
                 timestring = fname
-            tstamp = datetime.datetime.strptime(timestring, fmt)
+            tstamp = datetime.datetime.strptime(timestring, self.fmt)
             if timestamps is not None:
                 timestamps = [tstamp + dt for dt in timestamps]
             else:
@@ -566,7 +588,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             ds = self._open_dataset(path)
             if self.timename not in ds.indexes:  # pragma: no cover
                 raise ReaderError(
-                    f"Time dimension {self.timename} does not exist in " f"{str(path)}"
+                    f"Time dimension {self.timename} does not exist in "
+                    f"{str(path)}"
                 )
             time = ds.indexes[self.timename]
             timestamps = [t.to_pydatetime() for t in time]
@@ -574,10 +597,11 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
 
     @property
     def example_dataset(self) -> xr.Dataset:
-        if not hasattr(self, "_example_dataset") or self._example_dataset is None:
-            self._example_dataset = self._make_nicer_ds(
-                self._open_dataset(self._example_file)
-            )
+        if (
+            not hasattr(self, "_example_dataset")
+            or self._example_dataset is None
+        ):
+            self._example_dataset = self._open_nice_dataset(self._example_file)
         return self._example_dataset
 
     def _calculate_averaging_timestamp(self, tstamp) -> datetime.datetime:
@@ -618,7 +642,9 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                 times_to_read = self._output_tstamp_map[tstamp]
                 tmp_block_dict = self._read_all_files(times_to_read, False)
                 for varname in self.varnames:
-                    block_dict[varname].append(np.mean(tmp_block_dict[varname], axis=0))
+                    block_dict[varname].append(
+                        np.mean(tmp_block_dict[varname], axis=0)
+                    )
             # now we just have to convert the lists of arrays to array stacks
             for varname in self.varnames:
                 block_dict[varname] = np.stack(block_dict[varname], axis=0)
@@ -630,7 +656,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         numpy arrays. Can be overriden in case it's easier to provide this
         format than xarray datasets.
         """
-        ds = self._make_nicer_ds(self._open_dataset(fname))
+        ds = self._open_nice_dataset(fname)
         block_dict = {}
         for varname in self.varnames:
             arr = ds[varname]
@@ -688,7 +714,31 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             ds = ds.rename(self.rename)
         return ds
 
-    def _fix_varnames_rename_level(self, varnames, rename, level, skip_missing):
+    def _convert_timeoffset(self, ds, fname) -> xr.Dataset:
+        if self.timeoffset is not None:
+            varname, unit = self.timeoffset
+            assert "since" not in unit, "time offset units must be relative to current timestamp"
+            timestamp = self._tstamps_in_file(fname)[0]
+            unit = f"{unit} since {str(timestamp)}"
+            # cftime can't handle NaNs well, so we have to fill them, using 0
+            # as fill value here (current timestamp)
+            offset = ds[varname].values
+            offset[np.isnan(offset)] = 0
+            dates = cftime.num2date(offset, unit)
+            # reconvert to fixed time reference
+            offset_num = cftime.date2num(dates, self.timeoffsetformat)
+            ds[varname].values = offset_num.reshape(ds[varname].shape)
+            ds[varname].attrs["units"] = self.timeoffsetformat
+            ds[varname].attrs["long_name"] = "Observation time"
+        return ds
+
+    def _open_nice_dataset(self, fname) -> xr.Dataset:
+        ds = self._make_nicer_ds(self._open_dataset(fname))
+        return self._convert_timeoffset(ds, fname)
+
+    def _fix_varnames_rename_level(
+        self, varnames, timeoffset, rename, level, skip_missing
+    ):
         # To skip missing variables, we have to remove the variable names
         # from `varnames`, `rename`, and `level`.
         # Since `varnames` contains the final variable names, we first have
@@ -713,6 +763,12 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # in the file)
         if isinstance(varnames, str):
             varnames = [varnames]
+        if timeoffset is not None:
+            offsetvarname = timeoffset[0]
+            if rename is not None and offsetvarname in rename:
+                offsetvarname = rename[offsetvarname]
+            if offsetvarname not in varnames:
+                varnames.append(offsetvarname)
         level = self.normalize_level(level, varnames)
         if skip_missing:
             # Be careful: skip_missing only works if _open_dataset does not do
@@ -779,7 +835,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
                     new_varnames.append(l2name)
                 else:
                     warnings.warn(
-                        f"Skipping variable '{l2name}' because it does not exist!"
+                        f"Skipping variable '{l2name}' because it does"
+                        " not exist!"
                     )
             varnames = new_varnames
         return varnames, rename, level

@@ -160,7 +160,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help=(
                 "Can be set to 'daily' for getting daily averages if the"
                 " dataset has a sub-daily resolution."
-            )
+            ),
         )
         self.add_argument(
             "--discard_attrs",
@@ -301,7 +301,9 @@ def parse_args(parser, args):
     input_path = Path(args.dataset_root)
     if input_path.is_file():
         reader = XarrayImageStackReader(
-            input_path, args.parameter, **common_reader_kwargs,
+            input_path,
+            args.parameter,
+            **common_reader_kwargs,
         )
     else:
         reader = DirectoryImageReader(

@@ -202,31 +202,18 @@ def test_bbox_landmask_cellsize(cmip_ds):
 
 
 def test_SMOS(test_output_path):
+
     reader = DirectoryImageReader(
         test_data_path / "SMOS_L3",
-        varnames=["Soil_Moisture", "Mean_Acq_Time_Seconds"],
+        varnames=["Soil_Moisture", "Mean_Acq_Time"],
+        rename={"Mean_Acq_Time_Seconds": "Mean_Acq_Time"},
+        timeoffset=("Mean_Acq_Time", "seconds"),
         time_regex_pattern="SM_OPER_MIR_CLF31A_([0-9T]+)_.*.DBL.nc",
         fmt="%Y%m%dT%H%M%S",
     )
 
     outpath = test_output_path / "SMOS_ts"
-    outpath.mkdir(exist_ok=True, parents=True)
-
-    reshuffler = Img2Ts(
-        input_dataset=reader,
-        outputpath=str(outpath),
-        startdate=reader.timestamps[0],
-        enddate=reader.timestamps[-1],
-        ts_attributes=reader.global_attrs,
-        zlib=True,
-        imgbuffer=3,
-        cellsize_lat=5,
-        cellsize_lon=5,
-    )
-    reshuffler.orthogonal = True
-    reshuffler.calc()
-
-    ts_reader = GriddedNcOrthoMultiTs(outpath, time_offset_name="Mean_Acq_Time_Seconds")
+    ts_reader = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
     df = ts_reader.read(ts_reader.grid.activegpis[100])
     expected_timestamps = list(
         map(

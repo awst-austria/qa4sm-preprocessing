@@ -110,9 +110,7 @@ class XarrayReaderBase:
         array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
         return global_attrs, array_attrs
 
-    def _gridinfo_from_dataset(
-        self, ds: xr.Dataset, lat, lon, construct_grid
-    ):
+    def _gridinfo_from_dataset(self, ds: xr.Dataset, lat, lon, construct_grid):
         """
         Full setup of grid when a dataset is available.
         """
@@ -122,9 +120,7 @@ class XarrayReaderBase:
         # The grid can either be inferred from the arguments passed, or from
         # the first file in the dataset
         if lat is not None or lon is not None:
-            lat, lon = self._latlon_from_arguments(
-                lat, lon
-            )
+            lat, lon = self._latlon_from_arguments(lat, lon)
         else:
             lat, lon = self._latlon_from_dataset(ds)
         if construct_grid:
@@ -243,10 +239,18 @@ class XarrayReaderBase:
         num_gpis = len(grid.activegpis)
         logging.debug(f"finalize_grid: Number of active gpis: {num_gpis}")
 
-        if hasattr(self, "cellsize") and self.cellsize is not None:
+        if hasattr(self, "cellsize"):
+            if self.cellsize is None:
+                # Automatically set a suitable cell size, aiming at cell sizes
+                # of about 30**2 pixels.
+                deltalat = np.max(grid.activearrlat) - np.min(grid.activearrlat)
+                deltalon = np.max(grid.activearrlon) - np.min(grid.activearrlon)
+                self.cellsize = 30 * np.sqrt(deltalat*deltalon/len(grid.activegpis))
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
-            logging.debug(f"_grid_from_xarray: Number of grid cells: {num_cells}")
+            logging.debug(
+                f"_grid_from_xarray: Number of grid cells: {num_cells}"
+            )
 
         return grid
 
@@ -255,12 +259,10 @@ class XarrayReaderBase:
             if self.gridtype == "regular":
                 latname = self.latname
                 lonname = self.lonname
-            else:   # self.gridtype == "curvilinear"
+            else:  # self.gridtype == "curvilinear"
                 latname = self.latdim
                 lonname = self.londim
-            img = img.stack(
-                dimensions={"loc": (latname, lonname)}
-            )
+            img = img.stack(dimensions={"loc": (latname, lonname)})
         return img
 
 
@@ -314,208 +316,3 @@ class LevelSelectionMixin:
                     tmp_list.append((tmpname, tmparr))
             output_list = tmp_list
         return output_list
-
-
-class XarrayImageReaderBase(XarrayReaderBase):
-    """
-    Base class for image readers backed by xarray objects (multiple single
-    images or single stack of multiple images).
-
-    Provides the methods
-    - self.tstamps_for_daterange
-    - self.read
-    - self.read_block
-
-    and therefore meets all prerequisites for Img2Ts.
-
-    Child classes must override `_read_block` and need to set the attribute
-    self.timestamps to an iterable of available timestamps.
-    """
-
-    def _validate_start_end(
-        self,
-        start: Union[datetime.datetime, str],
-        end: Union[datetime.datetime, str],
-    ) -> Tuple[datetime.datetime]:
-        if start is None:
-            start = self.timestamps[0]
-        elif isinstance(start, str):
-            start = mkdate(start)
-        if end is None:
-            end = self.timestamps[-1]
-        elif isinstance(end, str):
-            end = mkdate(end)
-        return start, end
-
-    def tstamps_for_daterange(
-        self,
-        start: Union[datetime.datetime, str],
-        end: Union[datetime.datetime, str],
-    ) -> List[datetime.datetime]:
-        """
-        Timestamps available within the given date range.
-
-        Parameters
-        ----------
-        start: datetime, np.datetime64 or str
-            start of date range
-        end: datetime, np.datetime64 or str
-            end of date range
-
-        Returns
-        -------
-        timestamps : array_like
-            Array of datetime.datetime timestamps of available images in the
-            date range.
-        """
-        # evaluate the input to obtain the correct format
-        start, end = self._validate_start_end(start, end)
-        tstamps = list(filter(lambda t: start <= t <= end, self.timestamps))
-
-        return tstamps
-
-    @property
-    def timestamps(self):
-        return self._timestamps
-
-    @abstractmethod
-    def _read_block(
-        self, start: datetime.datetime, end: datetime.datetime
-    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:  # pragma: no cover
-        """
-        Reads multiple images of a dataset as a numpy/dask array.
-
-        Parameters
-        ----------
-        start, end : datetime.datetime
-
-        Returns
-        -------
-        block : np.ndarray or dask.array.core.Array
-            Block of data (data cube) with dimension order:
-            - time, lat, lon for data on a regular 2D grid
-            - time, y, x for data on a curvilinear 2D grid
-            - time, loc for unstructured data
-        """
-        ...
-
-    def read_block(
-        self,
-        start: Union[datetime.datetime, str] = None,
-        end: Union[datetime.datetime, str] = None,
-        _apply_landmask_bbox=True,
-    ) -> xr.Dataset:
-        """
-        Reads a block of the image stack.
-
-        Parameters
-        ----------
-        start : datetime.datetime or str, optional
-            If not given, start at first timestamp in dataset.
-        end : datetime.datetime or str, optional
-            If not given, end at last timestamp in dataset.
-        _apply_landmask_bbox : bool, optional
-            For internal use only. Whether to apply the landmask and bounding
-            box. Should be always set to True, except when calling from within
-            `read`, because selection is then made based on the full grid.
-
-        Returns
-        -------
-        block : xr.Dataset
-            A block of the dataset. In case of a regular grid, this will have
-            ``self.latname`` and ``self.lonname`` as dimensions.
-        """
-        start, end = self._validate_start_end(start, end)
-        times = self.tstamps_for_daterange(start, end)
-        block_dict = self._read_block(start, end)
-
-        # we might need to apply the landmask
-        if self.landmask is not None and _apply_landmask_bbox:
-            mask = np.broadcast_to(
-                ~self.landmask.values, [len(times)] + list(self.landmask.shape)
-            )
-            for var in block_dict:
-                if isinstance(block_dict[var], np.ndarray):
-                    masked_array = np.ma.masked_array
-                elif isinstance(block_dict[var], da.core.Array):
-                    masked_array = da.ma.masked_array
-                else:
-                    raise ReaderError("Unknown array type in read_block.")
-                block_dict[var] = masked_array(block_dict[var], mask=mask)
-
-        # Now we have to set the coordinates/dimensions correctly.  This works
-        # differently depending on how the original data is structured:
-        coords = {}
-        coords[self.timename] = times
-        if self.gridtype == "regular":
-            # we can simply wrap the data with time, lat, and lon
-            coords[self.latname] = self.lat
-            coords[self.lonname] = self.lon
-            dims = (self.timename, self.latname, self.lonname)
-        elif self.gridtype == "curvilinear":
-            coords[self.latname] = ([self.latdim, self.londim], self.lat)
-            coords[self.lonname] = ([self.latdim, self.londim], self.lon)
-            dims = (self.timename, self.latdim, self.londim)
-        else:  # unstructured grid
-            coords[self.latname] = (self.locdim, self.lat.data)
-            coords[self.lonname] = (self.locdim, self.lon.data)
-            dims = (self.timename, self.locdim)
-
-        arrays = {
-            name: (dims, data, self.array_attrs[name])
-            for name, data in block_dict.items()
-        }
-        block = xr.Dataset(arrays, coords=coords, attrs=self.global_attrs)
-
-        # bounding box is applied after assigning the coordinates
-        if self.bbox is not None and _apply_landmask_bbox:
-            lonmin, latmin, lonmax, latmax = (*self.bbox,)
-            block = block.where(
-                (
-                    (latmin <= block[self.latname])
-                    & (block[self.latname] <= latmax)
-                    & (
-                        (lonmin <= block[self.lonname])
-                        & (block[self.lonname] <= lonmax)
-                    )
-                ),
-                drop=True,
-            )
-        return block
-
-    def read(self, timestamp: Union[datetime.datetime, str], **kwargs) -> Image:
-        """
-        Read a single image at a given timestamp. Raises `ReaderError` if
-        timestamp is not available in the dataset.
-
-        Parameters
-        ----------
-        timestamp : datetime.datetime or str
-            Timestamp of image of interest
-
-        Returns
-        -------
-        img_dict : dict
-            Dictionary containing the image data as numpy array, using the
-            parameter name as key.
-
-        Raises
-        ------
-        KeyError
-        """
-        if isinstance(timestamp, str):
-            timestamp = mkdate(timestamp)
-
-        if timestamp not in self.timestamps:  # pragma: no cover
-            raise ReaderError(f"Timestamp {timestamp} is not available in the dataset!")
-
-        img = self.read_block(timestamp, timestamp, _apply_landmask_bbox=False).isel(
-            {self.timename: 0}
-        )
-        img = self._stack(img)
-        data = {
-            varname: img[varname].values[self.grid.activegpis]
-            for varname in self.varnames
-        }
-        metadata = self.array_attrs
-        return Image(self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp)

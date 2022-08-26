@@ -1,12 +1,11 @@
 import datetime
 import numpy as np
 from pathlib import Path
+import shutil
 from typing import Iterable, Union
 import xarray as xr
 
-from pygeogrids.grids import BasicGrid
-
-from .base import XarrayImageReaderBase
+from .imagebase import XarrayImageReaderBase
 
 
 class XarrayImageStackReader(XarrayImageReaderBase):

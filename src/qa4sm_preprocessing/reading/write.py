@@ -61,7 +61,9 @@ def write_images(
         for timeidx in range(0, ntime_stack, stepsize):
             time = stack.indexes[dim][timeidx]
             fname = directory / time.strftime(f"{dsname}_{fmt}.nc")
-            img = stack.sel(**{dim: stack.indexes[dim][timeidx:timeidx+stepsize]})
+            img = stack.sel(
+                **{dim: stack.indexes[dim][timeidx : timeidx + stepsize]}
+            )
             img.to_netcdf(
                 fname,
                 encoding={

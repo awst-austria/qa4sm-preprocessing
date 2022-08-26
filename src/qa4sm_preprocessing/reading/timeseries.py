@@ -1,17 +1,15 @@
+import cftime
 import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
 from typing import Union, Iterable, Sequence
-import warnings
 import xarray as xr
 
-from pygeogrids.grids import BasicGrid
 from pygeogrids.netcdf import load_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 
 from .base import XarrayReaderBase
-from .utils import infer_chunksizes
 
 
 class XarrayTSReader(XarrayReaderBase):
@@ -99,24 +97,6 @@ class XarrayTSReader(XarrayReaderBase):
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds)
 
-        # # rechunk to good chunks for reading
-        # _latdim = latdim if latdim is not None else latname
-        # _londim = londim if londim is not None else lonname
-        # # with this construct I make sure that I select lat, lon, and time
-        # # in the right order
-        # ds_dims = dict(ds.dims)
-        # img_dims = ds[varnames[0]].dims
-        # dims = {}
-        # for dim in img_dims:
-        #     if dim in [_latdim, _londim, locdim, timename]:
-        #         dims[dim] = ds_dims[dim]
-        # shape = tuple(dims.values())
-        # chunks = infer_chunksizes(shape, 100, np.float32)
-        # ds = ds.chunk(dict(zip(list(dims), chunks)))
-
-        # if list(dims)[-1] != timename:
-        #     warnings.warn("Time should be the last dimension!")
-
         super().__init__(
             ds,
             varnames,
@@ -170,7 +150,9 @@ class XarrayTSReader(XarrayReaderBase):
             if self.gridtype == "unstructured":
                 gpi = self.grid.find_nearest_gpi(lon, lat)[0]
                 if not isinstance(gpi, np.integer):  # pragma: no cover
-                    raise ValueError(f"No gpi near (lon={lon}, lat={lat}) found")
+                    raise ValueError(
+                        f"No gpi near (lon={lon}, lat={lat}) found"
+                    )
         else:  # pragma: no cover
             raise ValueError(
                 f"args must have length 1 or 2, but has length {len(args)}"
@@ -189,8 +171,8 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         self,
         ts_path,
         grid_path=None,
-        time_offset_name=None,
-        time_offset_unit="S",
+        timevarname=None,
+        read_bulk=True,
         **kwargs,
     ):
         """
@@ -204,13 +186,10 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
             Path to grid file, that is used to organize the location of time
             series to read. If None is passed, grid.nc is searched for in the
             ts_path.
-        time_offset_name : str, optional
-            Name of the variable containing time offsets for a given location
-            and time that is added to the timestamp. If given,
-            `time_offset_units` must also be given. Default is None.
-        time_offset_unit : str, optional
-            Unit of the time offset. Default is "S" for seconds. Have a look at
-            `pd.to_timedelta` for possible units.
+        read_bulk : boolean, optional (default:False)
+            if set to True the data of all locations is read into memory,
+            and subsequent calls to read_ts read from the cache and not from
+            disk this makes reading complete files faster#
 
         Additional keyword arguments
         ----------------------------
@@ -225,10 +204,6 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
 
         Optional keyword arguments to pass to OrthoMultiTs class:
         ---------------------------------------------------------
-        read_bulk : boolean, optional (default:False)
-            if set to True the data of all locations is read into memory,
-            and subsequent calls to read_ts read from the cache and not from
-            disk this makes reading complete files faster#
         read_dates : boolean, optional (default:False)
             if false dates will not be read automatically but only on specific
             request useable for bulk reading because currently the netCDF
@@ -237,16 +212,23 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         if grid_path is None:  # pragma: no branch
             grid_path = os.path.join(ts_path, "grid.nc")
         grid = load_grid(grid_path)
-        super().__init__(ts_path, grid, **kwargs)
-        self.time_offset_name = time_offset_name
-        self.time_offset_unit = time_offset_unit
+        ioclass_kws = {}
+        if "ioclass_kws" in kwargs:
+            ioclass_kws.update(kwargs["ioclass_kws"])
+            del kwargs["ioclass_kws"]
+        ioclass_kws["read_bulk"] = read_bulk
+        super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
+        self.timevarname = timevarname
+
 
     def read(self, *args, **kwargs) -> pd.DataFrame:
         df = super().read(*args, **kwargs)
-        if self.time_offset_name is not None:
-            delta = pd.to_timedelta(
-                df[self.time_offset_name].values, unit=self.time_offset_unit
+        if self.timevarname is not None:
+            unit = self.fid.dataset.variables[self.timevarname].units
+            times = df[self.timevarname].values
+            index = pd.DatetimeIndex(
+                cftime.num2pydate(times, unit)
             )
-            df.index = df.index + delta
-            df.drop(self.time_offset_name, axis="columns", inplace=True)
+            df.index = index
+            df.drop(self.timevarname, axis="columns", inplace=True)
         return df

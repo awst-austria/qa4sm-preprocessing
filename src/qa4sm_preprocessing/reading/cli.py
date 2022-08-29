@@ -31,7 +31,7 @@ import sys
 
 from repurpose.img2ts import Img2Ts
 
-from .readers import XarrayImageStackReader, DirectoryImageReader
+from . import XarrayImageStackReader, DirectoryImageReader
 from .transpose import write_transposed_dataset
 from .utils import mkdate, str2bool
 
@@ -76,10 +76,11 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         self.add_argument(
             "--pattern",
             type=str,
-            default="*.nc",
+            default="**/*.nc",
             help=(
                 "If DATASET_ROOT is a directory, glob pattern to match files"
-                " Default is '*.nc'"
+                " Default is '**/*.nc' (all files ending with .nc without"
+                " restriction of directory depth)."
             ),
         )
         self.add_argument(
@@ -97,7 +98,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help=(
                 "If DATASET_ROOT is a directory, a regex pattern to select"
                 " the time string from the filename. If this is used, TIME_FMT"
-                " must be chosen accordingly. See nc_image_reader.readers for"
+                " must be chosen accordingly. See reading.image for"
                 " more info."
             ),
         )
@@ -131,8 +132,8 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         self.add_argument(
             "--lat",
             type=float,
-            metavar=("START", "STEP"),
-            nargs=2,
+            metavar=("START", "STOP", "STEP"),
+            nargs=3,
             default=None,
             help=(
                 "Start and stepsize for latitude vector, in case it can"
@@ -143,8 +144,8 @@ class ReaderArgumentParser(argparse.ArgumentParser):
         self.add_argument(
             "--lon",
             type=float,
-            metavar=("START", "STEP"),
-            nargs=2,
+            metavar=("START", "STOP", "STEP"),
+            nargs=3,
             default=None,
             help=(
                 "Start and stepsize for longitude vector, in case it can"
@@ -153,14 +154,13 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             ),
         )
         self.add_argument(
-            "--daily_average",
-            type=str2bool,
-            default=False,
+            "--average",
+            type=str,
+            default=None,
             help=(
-                "Switch to average sub-daily images to the relative daily level."
-                "This will only be effective in case the dataset has a sub-daily"
-                "resolution."
-            )
+                "Can be set to 'daily' for getting daily averages if the"
+                " dataset has a sub-daily resolution."
+            ),
         )
         self.add_argument(
             "--discard_attrs",
@@ -169,7 +169,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help=(
                 "Switch to discard the global attributes present in the "
                 "netCDF files of the input dataset."
-            )
+            ),
         )
         self.add_argument(
             "--bbox",
@@ -301,7 +301,9 @@ def parse_args(parser, args):
     input_path = Path(args.dataset_root)
     if input_path.is_file():
         reader = XarrayImageStackReader(
-            input_path, args.parameter, **common_reader_kwargs,
+            input_path,
+            args.parameter,
+            **common_reader_kwargs,
         )
     else:
         reader = DirectoryImageReader(
@@ -310,7 +312,7 @@ def parse_args(parser, args):
             fmt=args.time_fmt,
             pattern=args.pattern,
             time_regex_pattern=args.time_regex_pattern,
-            daily_average=args.daily_average,
+            average=args.average,
             discard_attrs=args.discard_attrs,
             **common_reader_kwargs,
         )

@@ -1,12 +1,11 @@
 import numpy as np
 from pathlib import Path
 import pytest
-import shutil
 import netCDF4
 import xarray as xr
 
-from qa4sm_preprocessing.nc_image_reader.readers import GriddedNcOrthoMultiTs, XarrayTSReader
-from qa4sm_preprocessing.nc_image_reader.cli import repurpose, transpose
+from qa4sm_preprocessing.reading import GriddedNcOrthoMultiTs, XarrayTSReader
+from qa4sm_preprocessing.reading.cli import repurpose, transpose
 
 # this is defined in conftest.py
 from pytest import test_data_path
@@ -22,19 +21,17 @@ def cli_args_lis(test_output_path):
         "2017-03-30",
         "2017-04-04",
         *("--parameter", "SoilMoist_inst"),
-        *("--pattern", "LIS_HIST*.nc"),
+        *("--pattern", "**/LIS_HIST*.nc"),
         *("--time_regex_pattern", r"LIS_HIST_(\d+)\..*\.nc"),
         *("--time_fmt", "%Y%m%d%H%M"),
         *("--latdim", "north_south"),
         *("--londim", "east_west"),
         *("--level", "SoilMoist_profiles:0"),
-        *("--lat", "29.875", "0.25"),
-        *("--lon", "-11.375", "0.25"),
+        *("--lat", "29.875", "54.75", "0.25"),
+        *("--lon", "-11.375", "1.0", "0.25"),
     ]
 
-# @pytest.mark.skip(
-#     reason="Function nc_image_reader.transpose._traspose is not compatible and should be updated"
-# )
+
 def test_transpose_lis(cli_args_lis, lis_noahmp_stacked):
     args = cli_args_lis
     args[1] = args[1] + "/lis_noahmp_transposed.nc"
@@ -75,6 +72,7 @@ def test_repurpose_lis(cli_args_lis, lis_noahmp_stacked):
     for gpi in reader.grid.activegpis:
         ts = reader.read(gpi)
         ref_ts = ref.read(gpi)
+        np.testing.assert_almost_equal(ts["SoilMoist_inst"].values, ref_ts["SoilMoist_inst"].values)
 
 
 @pytest.fixture

@@ -140,7 +140,7 @@ class XarrayImageReaderBase(XarrayReaderBase):
                     masked_array = np.ma.masked_array
                 elif isinstance(block_dict[var], da.core.Array):
                     masked_array = da.ma.masked_array
-                else:
+                else:  # pragma: no cover
                     raise ReaderError("Unknown array type in read_block.")
                 block_dict[var] = masked_array(block_dict[var], mask=mask)
 

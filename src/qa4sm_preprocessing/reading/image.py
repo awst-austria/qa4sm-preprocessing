@@ -282,17 +282,16 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         Dictionary to use to rename variables in the file. This is applied
         after level selection but before anything else, so all other parameters
         referring to variable names except 'level' should use the new names.
-    timeoffset : tuple, optional (default: None)
+    timeoffsetvarname : str, optional (default: None)
         Sometimes an image is not really an image (i.e. a snapshot at a fixed
         time), but is composed of multiple observations at different times
         (e.g. satellite overpasses). In these cases, image files often contain
         a time offset variable, that gives the exact observation time.
-        In this case, `timeoffset` can be set to a tuple of ``(<varname>,
-        <unit>)``.  <unit> can be "days", "hours", "minutes", "seconds", if
-        it is an offset to the image timestamp, or of the form "<unit> since
-        YYYY-MM-DD" if all offset images have the same base time.
-        Time offset is calculated after applying `rename`, so <varname> should
-        be the renamed variable name.
+        Time offset is calculated after applying `rename`, so
+        `timeoffsetvarname` should be the renamed variable name.
+    timeoffsetunit : str, optional (default: None)
+        The unit of the time offset. Required if `timeoffsetvarname` is not
+        ``None``. Valid values are "seconds"/, "minutes", "hours", "days".
     transpose: list, optional (default: None)
         By default, we assume that the order of coordinates is "time", "lat",
         "lon" (if all are present and on regular grids). If the time dimension
@@ -399,8 +398,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         pattern: str = "**/*.nc",
         time_regex_pattern: str = None,
         rename: dict = None,
-        timeoffset: Tuple[str,str] = None,
-        timeoffsetformat: str = "days since 1900-01-01",
+        timeoffsetvarname: str = None,
+        timeoffsetunit: str = None,
         transpose: Sequence = None,
         level: dict = None,
         skip_missing: bool = False,
@@ -428,7 +427,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # Before we do anything we have to assemble the files, because they are
         # necessary for the setup of the parent class
         directory = Path(directory).expanduser().resolve()
-        if not directory.exists():
+        if not directory.exists():  # pragma: no cover
             raise ReaderError(f"Directory does not exist: {str(directory)}")
         filepaths = sorted(glob.glob(str(directory / pattern), recursive=True))
         if not filepaths:  # pragma: no cover
@@ -448,10 +447,13 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         self.open_dataset_kwargs = open_dataset_kwargs.copy()
 
         varnames, rename, level = self._fix_varnames_rename_level(
-            varnames, timeoffset, rename, level, skip_missing
+            varnames, timeoffsetvarname, rename, level, skip_missing
         )
-        self.timeoffset = timeoffset
-        self.timeoffsetformat = timeoffsetformat
+        self.timeoffsetvarname = timeoffsetvarname
+        if self.timeoffsetvarname is not None:
+            assert timeoffsetunit is not None
+            self.timeoffsetunit = timeoffsetunit.lower()[0]
+            assert self.timeoffsetunit in ["s", "m", "h", "d"]
         self.rename = rename
         self.level = level
         self.transpose = transpose
@@ -715,29 +717,32 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         return ds
 
     def _convert_timeoffset(self, ds, fname) -> xr.Dataset:
-        if self.timeoffset is not None:
-            varname, unit = self.timeoffset
-            assert "since" not in unit, "time offset units must be relative to current timestamp"
+        if self.timeoffsetvarname is not None:
+            var = self.timeoffsetvarname
+            assert "since" not in self.timeoffsetunit, (
+                "time offset units must be relative to current timestamp"
+            )
             timestamp = self._tstamps_in_file(fname)[0]
-            unit = f"{unit} since {str(timestamp)}"
-            # cftime can't handle NaNs well, so we have to fill them, using 0
-            # as fill value here (current timestamp)
-            offset = ds[varname].values
-            offset[np.isnan(offset)] = 0
-            dates = cftime.num2date(offset, unit)
-            # reconvert to fixed time reference
-            offset_num = cftime.date2num(dates, self.timeoffsetformat)
-            ds[varname].values = offset_num.reshape(ds[varname].shape)
-            ds[varname].attrs["units"] = self.timeoffsetformat
-            ds[varname].attrs["long_name"] = "Observation time"
+            start_date = cftime.num2date(0, f"days since {str(timestamp)}")
+            start = cftime.date2num(start_date, "days since 1900-01-01")
+
+            conversion = {
+                "s": 86400, "m": 24*60, "h": 24, "d": 1
+            }[self.timeoffsetunit]
+            # start = pd.to_datetime(timestamp).to_julian_date()
+            time = start + ds[var] / conversion
+            ds[var] = time
+            ds[var].attrs["units"] = "days since 1900-01-01"
+            ds[var].attrs["long_name"] = "Observation time"
         return ds
 
     def _open_nice_dataset(self, fname) -> xr.Dataset:
         ds = self._make_nicer_ds(self._open_dataset(fname))
-        return self._convert_timeoffset(ds, fname)
+        ds = self._convert_timeoffset(ds, fname)
+        return ds
 
     def _fix_varnames_rename_level(
-        self, varnames, timeoffset, rename, level, skip_missing
+        self, varnames, timeoffsetvarname, rename, level, skip_missing
     ):
         # To skip missing variables, we have to remove the variable names
         # from `varnames`, `rename`, and `level`.
@@ -763,12 +768,8 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # in the file)
         if isinstance(varnames, str):
             varnames = [varnames]
-        if timeoffset is not None:
-            offsetvarname = timeoffset[0]
-            if rename is not None and offsetvarname in rename:
-                offsetvarname = rename[offsetvarname]
-            if offsetvarname not in varnames:
-                varnames.append(offsetvarname)
+        if timeoffsetvarname is not None and timeoffsetvarname not in varnames:
+            varnames.append(timeoffsetvarname)
         level = self.normalize_level(level, varnames)
         if skip_missing:
             # Be careful: skip_missing only works if _open_dataset does not do

@@ -207,7 +207,8 @@ def test_SMOS(test_output_path):
         test_data_path / "SMOS_L3",
         varnames=["Soil_Moisture", "Mean_Acq_Time"],
         rename={"Mean_Acq_Time_Seconds": "Mean_Acq_Time"},
-        timeoffset=("Mean_Acq_Time", "seconds"),
+        timeoffsetvarname="Mean_Acq_Time",
+        timeoffsetunit="seconds",
         time_regex_pattern="SM_OPER_MIR_CLF31A_([0-9T]+)_.*.DBL.nc",
         fmt="%Y%m%dT%H%M%S",
     )

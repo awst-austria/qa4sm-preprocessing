@@ -8,7 +8,7 @@ from .utils import nimages_for_memory
 
 
 def write_images(
-    dataset: xr.Dataset,
+    dataset: Union[xr.Dataset, xr.DataArray],
     directory: Union[Path, str],
     dsname: str,
     fmt: str = "%Y%m%dT%H%M",
@@ -41,6 +41,8 @@ def write_images(
     invertlats : bool, optional (default: False)
         Whether to ensure that the latitude axis is inverted.
     """
+    if isinstance(dataset, xr.DataArray):
+        dataset = dataset.to_dataset(name=dsname)
     directory = Path(directory)
     directory.mkdir(exist_ok=True, parents=True)
     ntime = len(dataset[dim])

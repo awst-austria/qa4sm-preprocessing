@@ -15,7 +15,7 @@ from .exceptions import ReaderError
 from .utils import mkdate
 
 
-class XarrayReaderBase:
+class ReaderBase:
     """
     Base class for readers backed by xarray objects (images, image stacks,
     timeseries).
@@ -239,7 +239,7 @@ class XarrayReaderBase:
         num_gpis = len(grid.activegpis)
         logging.debug(f"finalize_grid: Number of active gpis: {num_gpis}")
 
-        if hasattr(self, "cellsize"):
+        if hasattr(self, "cellsize"):  # pragma: no branch
             if self.cellsize is None:
                 # Automatically set a suitable cell size, aiming at cell sizes
                 # of about 30**2 pixels.
@@ -249,7 +249,7 @@ class XarrayReaderBase:
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
             logging.debug(
-                f"_grid_from_xarray: Number of grid cells: {num_cells}"
+                f"finalize_grid: Number of grid cells: {num_cells}"
             )
 
         return grid

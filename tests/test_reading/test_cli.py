@@ -4,7 +4,7 @@ import pytest
 import netCDF4
 import xarray as xr
 
-from qa4sm_preprocessing.reading import GriddedNcOrthoMultiTs, XarrayTSReader
+from qa4sm_preprocessing.reading import GriddedNcOrthoMultiTs, StackTs
 from qa4sm_preprocessing.reading.cli import repurpose, transpose
 
 # this is defined in conftest.py
@@ -65,7 +65,7 @@ def test_repurpose_lis(cli_args_lis, lis_noahmp_stacked):
     outpath = Path(cli_args_lis[1])
     repurpose(cli_args_lis)
     reader = GriddedNcOrthoMultiTs(outpath)
-    ref = XarrayTSReader(lis_noahmp_stacked, "SoilMoist_inst")
+    ref = StackTs(lis_noahmp_stacked, "SoilMoist_inst")
     assert np.all(
         np.sort(reader.grid.activegpis) == np.sort(ref.grid.activegpis)
     )
@@ -122,10 +122,10 @@ def test_repurpose_cmip(cli_args_cmip, cmip_ds):
     repurpose(cli_args_cmip)
     reader = GriddedNcOrthoMultiTs(outpath)
     ref_ds = ref = cmip_ds.sel(lat=slice(20, 30), lon=slice(90, 100))
-    ref = XarrayTSReader(ref_ds, "mrsos")
+    ref = StackTs(ref_ds, "mrsos")
     # not comparing the grid GPIs here, because for "repurpose", the grid
     # started of as a global grid, from which a bbox was selected, while for
-    # XarrayTSReader the grid was already only points the bbox.
+    # StackTs the grid was already only points the bbox.
     _, lons, lats, _ = reader.grid.get_grid_points()
     for lon, lat in zip(lons, lats):
         ts = reader.read(lon, lat)["mrsos"]

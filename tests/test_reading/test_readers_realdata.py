@@ -7,7 +7,7 @@ from repurpose.img2ts import Img2Ts
 
 from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
-    XarrayImageStackReader,
+    StackImageReader,
     GriddedNcOrthoMultiTs,
 )
 from qa4sm_preprocessing.reading.utils import mkdate
@@ -116,7 +116,7 @@ def test_read_block(lis_noahmp_directory_image_reader):
     block = lis_noahmp_directory_image_reader.read_block()
     assert block["SoilMoist_inst"].shape == (6, 100, 50)
 
-    reader = XarrayImageStackReader(block, "SoilMoist_inst")
+    reader = StackImageReader(block, "SoilMoist_inst")
     validate_reader(reader)
 
     start_date = next(iter(lis_noahmp_directory_image_reader.timestamps))
@@ -133,7 +133,7 @@ def test_xarray_reader_basic(default_xarray_reader):
 def test_stack_reader_basic(cmip_ds):
     num_gpis = cmip_ds["mrsos"].isel(time=0).size
 
-    reader = XarrayImageStackReader(cmip_ds, "mrsos", cellsize=5.0)
+    reader = StackImageReader(cmip_ds, "mrsos", cellsize=5.0)
     assert len(reader.grid.activegpis) == num_gpis
     assert len(np.unique(reader.grid.activearrcell)) == 100
     block = reader.read_block()["mrsos"]
@@ -152,7 +152,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
     max_lon = 100
     max_lat = 30
     bbox = [min_lon, min_lat, max_lon, max_lat]
-    reader = XarrayImageStackReader(cmip_ds, "mrsos", bbox=bbox, cellsize=5.0)
+    reader = StackImageReader(cmip_ds, "mrsos", bbox=bbox, cellsize=5.0)
     num_gpis_box = len(reader.grid.activegpis)
     assert num_gpis_box < num_gpis
     assert len(np.unique(reader.grid.activearrcell)) == 4
@@ -169,7 +169,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
 
     # now additionally using a landmask
     landmask = ~np.isnan(cmip_ds.mrsos.isel(time=0))
-    reader = XarrayImageStackReader(
+    reader = StackImageReader(
         cmip_ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
     )
     assert len(reader.grid.activegpis) < num_gpis
@@ -188,7 +188,7 @@ def test_bbox_landmask_cellsize(cmip_ds):
     # with landmask as variable name
     ds = cmip_ds
     ds["landmask"] = landmask
-    reader = XarrayImageStackReader(
+    reader = StackImageReader(
         ds, "mrsos", bbox=bbox, landmask=landmask, cellsize=5.0
     )
     assert len(reader.grid.activegpis) < num_gpis
@@ -215,18 +215,30 @@ def test_SMOS(test_output_path):
 
     outpath = test_output_path / "SMOS_ts"
     ts_reader = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
-    df = ts_reader.read(ts_reader.grid.activegpis[100])
-    expected_timestamps = list(
-        map(
-            mkdate,
-            [
-                "2015-05-06T03:50:13",
-                "2015-05-07T03:11:27",
-                "2015-05-08T02:33:02",
-            ],
+
+    def validate(ts_reader):
+        df = ts_reader.read(ts_reader.grid.activegpis[100])
+        expected_timestamps = list(
+            map(
+                mkdate,
+                [
+                    "2015-05-06T03:50:13",
+                    "2015-05-07T03:11:27",
+                    "2015-05-08T02:33:02",
+                ],
+            )
         )
-    )
-    expected_values = np.array([0.162236, 0.013245, np.nan])
-    assert np.all(expected_timestamps == df.index)
-    np.testing.assert_almost_equal(expected_values, df.Soil_Moisture.values, 6)
-    assert np.all(df.columns == ["Soil_Moisture"])
+        expected_values = np.array([0.162236, 0.013245, np.nan])
+        assert np.all(expected_timestamps == df.index)
+        np.testing.assert_almost_equal(expected_values, df.Soil_Moisture.values, 6)
+        assert np.all(df.columns == ["Soil_Moisture"])
+
+    validate(ts_reader)
+
+    # test overwriting again with an existing directory
+    ts_reader = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
+    validate(ts_reader)
+
+    # test reading without overwriting
+    ts_reader = reader.repurpose(outpath, overwrite=False, timevarname="Mean_Acq_Time")
+    validate(ts_reader)

@@ -7,7 +7,7 @@ import xarray as xr
 
 from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
-    XarrayImageStackReader,
+    StackImageReader,
 )
 
 
@@ -113,10 +113,10 @@ def synthetic_test_args(request):
         kwargs = {}
     elif request.param == "curvilinear":
         ds = make_curvilinear_test_dataset()
-        kwargs = {"curvilinear": True, "latdim": "x", "londim": "y"}
+        kwargs = {"curvilinear": True, "latdim": "y", "londim": "x"}
     elif request.param == "unstructured":
         ds = make_unstructured_test_dataset()
-        kwargs = {"locdim": "loc"}
+        kwargs = {"locdim": "location"}
     else:
         raise NotImplementedError
     return ds, kwargs
@@ -151,7 +151,7 @@ def lis_noahmp_stacked(lis_noahmp_directory_image_reader):
 
 @pytest.fixture
 def default_xarray_reader(lis_noahmp_stacked):
-    return XarrayImageStackReader(lis_noahmp_stacked, "SoilMoist_inst")
+    return StackImageReader(lis_noahmp_stacked, "SoilMoist_inst")
 
 
 @pytest.fixture

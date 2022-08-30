@@ -31,7 +31,7 @@ import sys
 
 from repurpose.img2ts import Img2Ts
 
-from . import XarrayImageStackReader, DirectoryImageReader
+from . import StackImageReader, DirectoryImageReader
 from .transpose import write_transposed_dataset
 from .utils import mkdate, str2bool
 
@@ -211,40 +211,24 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             default=True,
             help="Whether to use compression or not. Default is true",
         )
-
-
-class RepurposeArgumentParser(ReaderArgumentParser):
-    def __init__(self):
-        super().__init__("Converts data to time series format.")
-        self.prog = "repurpose_images"
-        self.add_argument(
-            "--imgbuffer",
-            type=int,
-            default=365,
-            help=(
-                "How many images to read at once. Bigger "
-                "numbers make the conversion faster but "
-                "consume more memory. Default is 365."
-            ),
-        )
-        self.add_argument(
-            "--cellsize",
-            type=float,
-            default=5.0,
-            help=("Size of single file cells. Default is 5.0."),
-        )
-
-
-class TransposeArgumentParser(ReaderArgumentParser):
-    def __init__(self):
-        super().__init__("Converts data to transposed netCDF.")
-        self.prog = "transpose_images"
         self.add_argument(
             "--memory",
             type=float,
             default=2,
             help="The amount of memory to use as buffer in GB",
         )
+
+
+class RepurposeArgumentParser(ReaderArgumentParser):
+    def __init__(self):
+        super().__init__("Converts data to time series format.")
+        self.prog = "repurpose_images"
+
+
+class TransposeArgumentParser(ReaderArgumentParser):
+    def __init__(self):
+        super().__init__("Converts data to transposed netCDF.")
+        self.prog = "transpose_images"
         self.add_argument(
             "--n_threads",
             type=int,
@@ -300,7 +284,7 @@ def parse_args(parser, args):
 
     input_path = Path(args.dataset_root)
     if input_path.is_file():
-        reader = XarrayImageStackReader(
+        reader = StackImageReader(
             input_path,
             args.parameter,
             **common_reader_kwargs,
@@ -327,19 +311,12 @@ def repurpose(args):
     outpath = Path(args.output_root)
     outpath.mkdir(exist_ok=True, parents=True)
 
-    reshuffler = Img2Ts(
-        input_dataset=reader,
-        outputpath=args.output_root,
-        startdate=args.start,
-        enddate=args.end,
-        ts_attributes=reader.global_attrs,
-        zlib=args.zlib,
-        imgbuffer=args.imgbuffer,
-        # this is necessary currently due to bug in repurpose
-        cellsize_lat=args.cellsize,
-        cellsize_lon=args.cellsize,
+    reader.repurpose(
+        args.output_root,
+        start=args.start,
+        end=args.end,
+        memory=args.memory
     )
-    reshuffler.calc()
 
 
 def transpose(args):

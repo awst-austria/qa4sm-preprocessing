@@ -5,7 +5,7 @@ Developer's guide
 The ``DirectoryImageReader`` aims to provide an easy to use class to read
 directories of single images, to either create a single image stack file, a
 transposed stack (via ``write_transposed_dataset``), or a cell-based timeseries
-dataset (via the repurpose package).
+dataset (via the ``repurpose`` method).
 
 The advantage over ``xr.open_mfdataset`` is that the reader typically does not
 need to open each dataset to get information on coordinates. Instead, the
@@ -35,7 +35,7 @@ The main routines that should be modified when subclassing are:
 * ``_metadata_from_dataset``: If metadata cannot be read from the files.
 * ``_tstamps_in_file``: If the timestamp cannot be inferred from the filename
   but via other info specific to the dataset this can be used to avoid having
-  to reading all files only to get the timestamps.
+  to read all files only to get the timestamps.
 * ``_landmask_from_dataset``: If a landmask is required (only if the ``read``
   function is used), and it cannot be read with ``_open_dataset`` and also not
   with other options. Should not be necessary very often.
@@ -43,7 +43,8 @@ The main routines that should be modified when subclassing are:
   the data as dictionary that maps from variable names to 3d data arrays (numpy
   or dask). If it is hard to read the data as xr.Dataset, so that overriding
   `_open_dataset` is not feasible, this could be overriden instead, but then
-  all the other routines for obtaining metadata also have to be overriden.
+  all the other routines for obtaining grid/metadata/landmask info also have to
+  be overriden.
 
 In the following some examples for subclassing are provided.
 
@@ -87,7 +88,7 @@ Subclassing for additional preprocessing
 It is often necessary to preprocess the data before using it. For example, many
 datasets contain quality flags as additional variable that need to be applied
 to mask out unreliable data. Another example would be a case where one is
-interested in a sum of multiple variables.  In this case it is necessary to
+interested in a sum of multiple variables.  In these cases it is necessary to
 override the ``_open_dataset`` method.
 
 As an example, consider that we have images containing a field "soil_moisture"
@@ -106,9 +107,9 @@ bit in the quality_flag is 0.  Our new reader would then be::
             )
 
         def _open_dataset(self, fname):
-            ds = super()_open_dataset(fname)
+            ds = super()._open_dataset(fname)
             qc = ds["quality_flag"]
-            # We check if the first bit is zero by doing a bitwise and with 1.
+            # We check if the first bit is zero by doing a bitwise AND with 1.
             # The result is 0 if the first bit is zero, and 1 otherwise.
             valid = (qc & 2**0) == 0
             return ds[["soil_moisture"]].where(valid)
@@ -151,8 +152,7 @@ grid). A reader could look like this::
                 fmt="%Y%m%d",
                 time_regex_pattern=r"SMAP_L3_SM_P_([0-9]+)_R.*.h5",
                 pattern="**/*.h5",
-                use_tqdm=True,   # for nice progress bar
-                #
+                # there are 2 timestamps in each file
                 timestamps=[pd.Timedelta("6H"), pd.Timedelta("18H")]
             )
 
@@ -198,7 +198,7 @@ If even less information can be obtained from the files, e.g. if the filenames
 don't contain timestamps, it might be necessary to also override
 `_tstamps_in_file`, `_metadata_from_dataset`, or
 `_landmask_from_dataset`. Since these are edge cases, they are not shown in
-detail here, but it works similarly to the other examples.
+detail here, but it works similar to the other examples.
 """
 
 import cftime
@@ -214,12 +214,12 @@ from typing import Union, Iterable, Sequence, Dict, Tuple, List
 import warnings
 import xarray as xr
 
-from .imagebase import XarrayImageReaderBase
+from .imagebase import ImageReaderBase
 from .base import LevelSelectionMixin
 from .exceptions import ReaderError
 
 
-class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
+class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
     r"""
     Image reader for a directory containing netcdf files.
 
@@ -637,7 +637,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
             # If we have to average multiple images to a single image, we will
             # read image by image
             block_dict = {varname: [] for varname in self.varnames}
-            if self.use_tqdm:
+            if self.use_tqdm:  # pragma: no branch
                 times = tqdm(times)
             for tstamp in times:
                 # read all sub-images that have to be averaged later on
@@ -696,7 +696,7 @@ class DirectoryImageReader(LevelSelectionMixin, XarrayImageReaderBase):
         # now we can open each file and extract the timestamps we need
         block_dict = {varname: [] for varname in self.varnames}
         iterator = file_tstamp_map.items()
-        if use_tqdm:
+        if use_tqdm:  # pragma: no branch
             iterator = tqdm(iterator)
         for fname, tstamps in iterator:
             _blockdict = self._read_single_file(fname, tstamps)

@@ -3,6 +3,7 @@ import dask
 import datetime
 import numpy as np
 from pathlib import Path
+import shutil
 from typing import Union, Iterable, List, Tuple, Sequence, Dict
 import xarray as xr
 
@@ -11,11 +12,11 @@ from repurpose.img2ts import Img2Ts
 
 from .exceptions import ReaderError
 from .utils import mkdate, nimages_for_memory
-from .base import XarrayReaderBase
+from .base import ReaderBase
 from .timeseries import GriddedNcOrthoMultiTs
 
 
-class XarrayImageReaderBase(XarrayReaderBase):
+class ImageReaderBase(ReaderBase):
     """
     Base class for image readers backed by xarray objects (multiple single
     images or single stack of multiple images).
@@ -38,11 +39,11 @@ class XarrayImageReaderBase(XarrayReaderBase):
     ) -> Tuple[datetime.datetime]:
         if start is None:
             start = self.timestamps[0]
-        elif isinstance(start, str):
+        elif isinstance(start, str):  # pragma: no cover
             start = mkdate(start)
         if end is None:
             end = self.timestamps[-1]
-        elif isinstance(end, str):
+        elif isinstance(end, str):  # pragma: no cover
             end = mkdate(end)
         return start, end
 
@@ -206,7 +207,7 @@ class XarrayImageReaderBase(XarrayReaderBase):
         ------
         KeyError
         """
-        if isinstance(timestamp, str):
+        if isinstance(timestamp, str):  # pragma: no cover
             timestamp = mkdate(timestamp)
 
         if timestamp not in self.timestamps:  # pragma: no cover
@@ -268,13 +269,13 @@ class XarrayImageReaderBase(XarrayReaderBase):
         """
         outpath = Path(outpath)
         start, end = self._validate_start_end(start, end)
-        if outpath.exists() and overwrite:
+        if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
-        if not outpath.exists():  # if overwrite=True, it was deleted now
+        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
             n = nimages_for_memory(testimg, memory)
-            if hasattr(self, "use_tqdm"):
+            if hasattr(self, "use_tqdm"): # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
             reshuffler = Img2Ts(
@@ -290,7 +291,7 @@ class XarrayImageReaderBase(XarrayReaderBase):
                 imgbuffer=n,
             )
             reshuffler.calc()
-            if hasattr(self, "use_tqdm"):
+            if hasattr(self, "use_tqdm"):  # pragma: no branch
                 self.use_tqdm = orig_tqdm
         reader = GriddedNcOrthoMultiTs(str(outpath), timevarname=timevarname, read_bulk=True)
         return reader

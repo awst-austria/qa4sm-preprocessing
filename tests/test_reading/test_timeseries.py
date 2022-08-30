@@ -59,4 +59,3 @@ def test_GriddedNcOrthoMultiTs(synthetic_test_args):
     ):
         tsreader = GriddedNcOrthoMultiTs(tspath, ioclass_kws={"read_bulk": True}, read_bulk=False)
         assert tsreader.ioclass_kws["read_bulk"] is False
-    

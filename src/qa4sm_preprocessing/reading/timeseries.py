@@ -231,7 +231,6 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
                     f" {ioclass_kws['read_bulk']}. The first takes precedence."
                 )
         ioclass_kws["read_bulk"] = read_bulk
-
         super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
         self.timevarname = timevarname
 

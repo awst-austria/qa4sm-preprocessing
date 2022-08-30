@@ -5,7 +5,17 @@ Changelog
 Unreleased
 ==========
 
--
+v0.1.2
+======
+
+- more features for ``DirectoryImageReader``
+  - handling of "image" files with multiple time steps
+  - better documentation for subclassing
+- renaming of other readers
+  - ``XarrayImageStackReader`` to ``StackImageReader``
+  - ``XarrayTSReader`` to ``StackTs``
+- ``repurpose`` function for image readers
+- improved test coverage
 
 v0.1.0
 ======

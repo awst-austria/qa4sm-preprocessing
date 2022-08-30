@@ -5,10 +5,10 @@ import shutil
 from typing import Iterable, Union
 import xarray as xr
 
-from .imagebase import XarrayImageReaderBase
+from .imagebase import ImageReaderBase
 
 
-class XarrayImageStackReader(XarrayImageReaderBase):
+class StackImageReader(ImageReaderBase):
     """
     Image reader that wraps a xarray.Dataset.
 

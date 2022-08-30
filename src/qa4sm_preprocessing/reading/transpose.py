@@ -39,7 +39,7 @@ def write_transposed_dataset(
 
     Parameters
     ----------
-    reader : XarrayImageReaderBase
+    reader : ImageReaderBase instance
         Reader for the dataset.
     outfname : str or Path
         Output filename. Must end with ".nc" for netCDF output or with ".zarr"
@@ -103,7 +103,7 @@ def write_transposed_dataset(
             )
         with dask.config.set(**dask_config):
             _transpose(*args, **kwargs)
-    else:
+    else:  # distributed is True
         with dask.config.set(**dask_config), Client(
             n_workers=1,
             threads_per_worker=n_threads,
@@ -129,7 +129,7 @@ def _transpose(
         orig_cache = reader.open_dataset_kwargs.get("cache")
         orig_chunks = reader.open_dataset_kwargs.get("chunks")
         reader.open_dataset_kwargs.update({"cache": False, "chunks": None})
-    if hasattr(reader, "use_tqdm"):
+    if hasattr(reader, "use_tqdm"):  # pragma: no branch
         orig_tqdm = reader.use_tqdm
         new_tqdm = stepsize == 1
         reader.use_tqdm = new_tqdm
@@ -142,7 +142,13 @@ def _transpose(
     testds = reader._testimg()
     coords = dict(testds.coords)
     coords[reader.timename] = timestamps
-    dims = dict(testds.dims)
+    # to get the correct order of dimensions, we use the first variable and
+    # assert that the other variables follow the same order
+    testvar = testds[reader.varnames[0]]
+    dims = dict(zip(testvar.dims, testvar.shape))
+    for var in reader.varnames:
+        testvar = testds[var]
+        assert dims == dict(zip(testvar.dims, testvar.shape))
     del dims[reader.timename]
     dims[reader.timename] = len(timestamps)
     new_dimsizes = tuple(size for size in dims.values())
@@ -285,9 +291,9 @@ def _transpose(
         ds.to_netcdf(outfname, encoding=encoding)
 
     # restore the reader settings
-    if hasattr(reader, "use_tqdm"):
+    if hasattr(reader, "use_tqdm"):  # pragma: no branch
         reader.use_tqdm = orig_tqdm
-    if hasattr(reader, "open_dataset_kwargs"):
+    if hasattr(reader, "open_dataset_kwargs"):  # pragma: no branch
         reader.open_dataset_kwargs.update(
             {"cache": orig_cache, "chunks": orig_chunks}
         )

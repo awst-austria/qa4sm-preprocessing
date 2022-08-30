@@ -4,15 +4,16 @@ import os
 import pandas as pd
 from pathlib import Path
 from typing import Union, Iterable, Sequence
+import warnings
 import xarray as xr
 
 from pygeogrids.netcdf import load_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 
-from .base import XarrayReaderBase
+from .base import ReaderBase
 
 
-class XarrayTSReader(XarrayReaderBase):
+class StackTs(ReaderBase):
     """
     Wrapper for xarray.Dataset when timeseries of the data should be read.
 
@@ -91,9 +92,6 @@ class XarrayTSReader(XarrayReaderBase):
         cellsize: float = None,
         construct_grid: bool = True,
     ):
-        if isinstance(varnames, str):
-            varnames = [varnames]
-        varnames = list(varnames)
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds)
 
@@ -172,7 +170,8 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         ts_path,
         grid_path=None,
         timevarname=None,
-        read_bulk=True,
+        read_bulk=None,
+        kd_tree_name="pykdtree",
         **kwargs,
     ):
         """
@@ -186,10 +185,15 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
             Path to grid file, that is used to organize the location of time
             series to read. If None is passed, grid.nc is searched for in the
             ts_path.
-        read_bulk : boolean, optional (default:False)
-            if set to True the data of all locations is read into memory,
+        read_bulk : boolean, optional (default: None)
+            If set to True (default) the data of all locations is read into memory,
             and subsequent calls to read_ts read from the cache and not from
-            disk this makes reading complete files faster#
+            disk this makes reading complete files faster.
+        timevarname : str, optional (default: None)
+            Name of the time variable to use instead of the original timestamps.
+        kd_tree_name : str, optional (default: "pykdtree")
+            Name of the Kd-tree engine used in the grid. Available options are
+            "pykdtree" and "scipy".
 
         Additional keyword arguments
         ----------------------------
@@ -211,11 +215,21 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         """
         if grid_path is None:  # pragma: no branch
             grid_path = os.path.join(ts_path, "grid.nc")
-        grid = load_grid(grid_path)
-        ioclass_kws = {}
+        grid = load_grid(grid_path, kd_tree_name=kd_tree_name)
+
+        ioclass_kws = kwargs.get("ioclass_kws", {})
         if "ioclass_kws" in kwargs:
-            ioclass_kws.update(kwargs["ioclass_kws"])
             del kwargs["ioclass_kws"]
+        # if read_bulk is not given, we use the value from ioclass_kws, or True
+        # if this is also given. Otherwise we overwrite the value in ioclass_kws
+        if read_bulk is None:
+            read_bulk = ioclass_kws.get("read_bulk", True)
+        else:
+            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
+                warnings.warn(
+                    f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
+                    f" {ioclass_kws['read_bulk']}. The first takes precedence."
+                )
         ioclass_kws["read_bulk"] = read_bulk
         super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
         self.timevarname = timevarname

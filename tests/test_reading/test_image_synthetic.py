@@ -29,7 +29,7 @@
 # Untested features
 # - get lat/lon from (start, stop, step) tuple: this is tested with the
 #   lis-noahmp test images
-# - landmask, bbox, cellsize: covered in XarrayImageStackReader tests
+# - landmask, bbox, cellsize: covered in StackImageReader tests
 
 import numpy as np
 import pandas as pd
@@ -331,7 +331,7 @@ def test_directory_image_reader_latlon_from_2d(regular_test_dataset):
     LON, LAT = np.meshgrid(ds.lon, ds.lat)
     ds["LAT"] = (["lat", "lon"], LAT)
     ds["LON"] = (["lat", "lon"], LON)
-    ds = ds.drop(["lat", "lon"])
+    ds = ds.drop_vars(["lat", "lon"])
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -467,7 +467,7 @@ def _write_multistep_files(ds, directory, drop_time=False):
     directory.mkdir(exist_ok=True)
     time = ds.indexes["time"]
     if drop_time:
-        ds = ds.drop("time")
+        ds = ds.drop_vars("time")
     ds1 = ds.isel(time=slice(0, 4))
     ds1.to_netcdf(directory / time[0].strftime("synthetic_%Y%m%d.nc"))
     ds2 = ds.isel(time=slice(4, 8))

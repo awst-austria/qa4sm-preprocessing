@@ -108,7 +108,7 @@ class StackImageReader(ImageReaderBase):
     ):
 
         if isinstance(ds, (str, Path)):
-            ds = xr.open_dataset(ds)
+            ds = xr.open_dataset(ds, engine='netcdf4')
         super().__init__(
             ds,
             varnames,

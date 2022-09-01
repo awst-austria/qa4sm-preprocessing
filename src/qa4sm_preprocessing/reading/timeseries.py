@@ -73,11 +73,14 @@ class StackTs(ReaderBase):
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
         memory.
+    **open_dataset_kwargs : keyword arguments
+       Additional keyword arguments passed to ``xr.open_dataset`` in case `ds`
+       is a filename.
     """
 
     def __init__(
         self,
-        ds: xr.Dataset,
+        ds: Union[xr.Dataset, str, Path],
         varnames: Union[str, Sequence],
         timename: str = "time",
         latname: str = "lat",
@@ -91,9 +94,10 @@ class StackTs(ReaderBase):
         bbox: Iterable = None,
         cellsize: float = None,
         construct_grid: bool = True,
+        **open_dataset_kwargs,
     ):
         if isinstance(ds, (str, Path)):
-            ds = xr.open_dataset(ds)
+            ds = xr.open_dataset(ds, **open_dataset_kwargs)
 
         super().__init__(
             ds,

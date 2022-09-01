@@ -85,11 +85,18 @@ class StackImageReader(ImageReaderBase):
         (lonmin, latmin, lonmax, latmax) of a bounding box.
     cellsize : float, optional
         Spatial coverage of a single cell file in degrees. Default is ``None``.
+    construct_grid : bool, optional (default: True)
+        Whether to construct a BasicGrid instance. For very large datasets it
+        might be necessary to turn this off, because the grid requires too much
+        memory.
+    **open_dataset_kwargs : keyword arguments
+       Additional keyword arguments passed to ``xr.open_dataset`` in case `ds`
+       is a filename.
     """
 
     def __init__(
         self,
-        ds: xr.Dataset,
+        ds: Union[xr.Dataset, str, Path],
         varnames: str,
         level: dict = None,
         timename: str = "time",
@@ -105,10 +112,11 @@ class StackImageReader(ImageReaderBase):
         cellsize: float = None,
         curvilinear: bool = False,
         construct_grid: bool = True,
+        **open_dataset_kwargs,
     ):
-
         if isinstance(ds, (str, Path)):
-            ds = xr.open_dataset(ds)
+            ds = xr.open_dataset(ds, **open_dataset_kwargs)
+
         super().__init__(
             ds,
             varnames,

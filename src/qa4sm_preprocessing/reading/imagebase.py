@@ -1,10 +1,11 @@
 from abc import abstractmethod
 import dask
+import dask.array as da
 import datetime
 import numpy as np
 from pathlib import Path
 import shutil
-from typing import Union, Iterable, List, Tuple, Sequence, Dict
+from typing import Union, List, Tuple, Dict
 import xarray as xr
 
 from pygeobase.object_base import Image
@@ -225,7 +226,11 @@ class ImageReaderBase(ReaderBase):
         }
         metadata = self.array_attrs
         img = Image(
-            self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp,
+            self.grid.arrlon,
+            self.grid.arrlat,
+            data,
+            metadata,
+            timestamp,
         )
         return img
 
@@ -239,13 +244,13 @@ class ImageReaderBase(ReaderBase):
         return img
 
     def repurpose(
-            self,
-            outpath: Union[Path, str],
-            start: Union[datetime.datetime, str] = None,
-            end: Union[datetime.datetime, str] = None,
-            overwrite: bool = False,
-            memory: float = 2,
-            timevarname: str = None,
+        self,
+        outpath: Union[Path, str],
+        start: Union[datetime.datetime, str] = None,
+        end: Union[datetime.datetime, str] = None,
+        overwrite: bool = False,
+        memory: float = 2,
+        timevarname: str = None,
     ):
         """
         Transforms the netCDF stack to the pynetcf timeseries format.
@@ -271,11 +276,13 @@ class ImageReaderBase(ReaderBase):
         start, end = self._validate_start_end(start, end)
         if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
-        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
+        if not (
+            outpath / "grid.nc"
+        ).exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
             n = nimages_for_memory(testimg, memory)
-            if hasattr(self, "use_tqdm"): # pragma: no branch
+            if hasattr(self, "use_tqdm"):  # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
             reshuffler = Img2Ts(
@@ -293,5 +300,7 @@ class ImageReaderBase(ReaderBase):
             reshuffler.calc()
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 self.use_tqdm = orig_tqdm
-        reader = GriddedNcOrthoMultiTs(str(outpath), timevarname=timevarname, read_bulk=True)
+        reader = GriddedNcOrthoMultiTs(
+            str(outpath), timevarname=timevarname, read_bulk=True
+        )
         return reader

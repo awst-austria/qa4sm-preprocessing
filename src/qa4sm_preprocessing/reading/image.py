@@ -485,9 +485,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         # The next step is to create a map that links filepaths to available
         # timestamps
         self._file_tstamp_map = {
-            path: self._tstamps_in_file(
-                path, timestamps=timestamps
-            )
+            path: self._tstamps_in_file(path, timestamps=timestamps)
             for path in filepaths
         }
         # tstamp_file_map maps each timestamp to the file where it can be found
@@ -719,16 +717,16 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
     def _convert_timeoffset(self, ds, fname) -> xr.Dataset:
         if self.timeoffsetvarname is not None:
             var = self.timeoffsetvarname
-            assert "since" not in self.timeoffsetunit, (
-                "time offset units must be relative to current timestamp"
-            )
+            assert (
+                "since" not in self.timeoffsetunit
+            ), "time offset units must be relative to current timestamp"
             timestamp = self._tstamps_in_file(fname)[0]
             start_date = cftime.num2date(0, f"days since {str(timestamp)}")
             start = cftime.date2num(start_date, "days since 1900-01-01")
 
-            conversion = {
-                "s": 86400, "m": 24*60, "h": 24, "d": 1
-            }[self.timeoffsetunit]
+            conversion = {"s": 86400, "m": 24 * 60, "h": 24, "d": 1}[
+                self.timeoffsetunit
+            ]
             # start = pd.to_datetime(timestamp).to_julian_date()
             time = start + ds[var] / conversion
             ds[var] = time

@@ -1,7 +1,6 @@
 import datetime
 import numpy as np
 from pathlib import Path
-import shutil
 from typing import Iterable, Union
 import xarray as xr
 
@@ -114,6 +113,7 @@ class StackImageReader(ImageReaderBase):
         construct_grid: bool = True,
         **open_dataset_kwargs,
     ):
+
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
 

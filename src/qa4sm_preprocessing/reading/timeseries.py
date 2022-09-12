@@ -190,11 +190,12 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
             series to read. If None is passed, grid.nc is searched for in the
             ts_path.
         read_bulk : boolean, optional (default: None)
-            If set to True (default) the data of all locations is read into memory,
-            and subsequent calls to read_ts read from the cache and not from
-            disk this makes reading complete files faster.
+            If set to True (default) the data of all locations is read into
+            memory, and subsequent calls to read_ts read from the cache and not
+            from disk this makes reading complete files faster.
         timevarname : str, optional (default: None)
-            Name of the time variable to use instead of the original timestamps.
+            Name of the time variable to use instead of the original
+            timestamps.
         kd_tree_name : str, optional (default: "pykdtree")
             Name of the Kd-tree engine used in the grid. Available options are
             "pykdtree" and "scipy".
@@ -225,11 +226,15 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         if "ioclass_kws" in kwargs:
             del kwargs["ioclass_kws"]
         # if read_bulk is not given, we use the value from ioclass_kws, or True
-        # if this is also given. Otherwise we overwrite the value in ioclass_kws
+        # if this is also given. Otherwise we overwrite the value in
+        # ioclass_kws
         if read_bulk is None:
             read_bulk = ioclass_kws.get("read_bulk", True)
         else:
-            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
+            if (
+                "read_bulk" in ioclass_kws
+                and read_bulk != ioclass_kws["read_bulk"]
+            ):
                 warnings.warn(
                     f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
                     f" {ioclass_kws['read_bulk']}. The first takes precedence."
@@ -238,15 +243,12 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
         self.timevarname = timevarname
 
-
     def read(self, *args, **kwargs) -> pd.DataFrame:
         df = super().read(*args, **kwargs)
         if self.timevarname is not None:
             unit = self.fid.dataset.variables[self.timevarname].units
             times = df[self.timevarname].values
-            index = pd.DatetimeIndex(
-                cftime.num2pydate(times, unit)
-            )
+            index = pd.DatetimeIndex(cftime.num2pydate(times, unit))
             df.index = index
             df.drop(self.timevarname, axis="columns", inplace=True)
         return df

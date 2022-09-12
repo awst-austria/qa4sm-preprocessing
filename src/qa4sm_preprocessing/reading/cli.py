@@ -29,8 +29,6 @@ import argparse
 from pathlib import Path
 import sys
 
-from repurpose.img2ts import Img2Ts
-
 from . import StackImageReader, DirectoryImageReader
 from .transpose import write_transposed_dataset
 from .utils import mkdate, str2bool
@@ -312,10 +310,7 @@ def repurpose(args):
     outpath.mkdir(exist_ok=True, parents=True)
 
     reader.repurpose(
-        args.output_root,
-        start=args.start,
-        end=args.end,
-        memory=args.memory
+        args.output_root, start=args.start, end=args.end, memory=args.memory
     )
 
 

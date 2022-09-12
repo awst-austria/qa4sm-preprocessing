@@ -1,18 +1,12 @@
-from abc import abstractmethod
-import dask
-import dask.array as da
-import datetime
 import logging
 import numpy as np
-from typing import Union, Iterable, List, Tuple, Sequence, Dict
+from typing import Union, Iterable, Sequence
 import warnings
 import xarray as xr
 
-from pygeobase.object_base import Image
 from pygeogrids.grids import gridfromdims, BasicGrid
 
 from .exceptions import ReaderError
-from .utils import mkdate
 
 
 class ReaderBase:
@@ -243,14 +237,18 @@ class ReaderBase:
             if self.cellsize is None:
                 # Automatically set a suitable cell size, aiming at cell sizes
                 # of about 30**2 pixels.
-                deltalat = np.max(grid.activearrlat) - np.min(grid.activearrlat)
-                deltalon = np.max(grid.activearrlon) - np.min(grid.activearrlon)
-                self.cellsize = 30 * np.sqrt(deltalat*deltalon/len(grid.activegpis))
+                deltalat = np.max(grid.activearrlat) - np.min(
+                    grid.activearrlat
+                )
+                deltalon = np.max(grid.activearrlon) - np.min(
+                    grid.activearrlon
+                )
+                self.cellsize = 30 * np.sqrt(
+                    deltalat * deltalon / len(grid.activegpis)
+                )
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
-            logging.debug(
-                f"finalize_grid: Number of grid cells: {num_cells}"
-            )
+            logging.debug(f"finalize_grid: Number of grid cells: {num_cells}")
 
         return grid
 

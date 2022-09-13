@@ -156,9 +156,9 @@ class ImageReaderBase(ReaderBase):
             coords[self.lonname] = self.lon
             dims = (self.timename, self.latname, self.lonname)
         elif self.gridtype == "curvilinear":
-            coords[self.latname] = ([self.latdim, self.londim], self.lat)
-            coords[self.lonname] = ([self.latdim, self.londim], self.lon)
-            dims = (self.timename, self.latdim, self.londim)
+            coords[self.latname] = ([self.ydim, self.xdim], self.lat)
+            coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
+            dims = (self.timename, self.ydim, self.xdim)
         else:  # unstructured grid
             coords[self.latname] = (self.locdim, self.lat.data)
             coords[self.lonname] = (self.locdim, self.lon.data)

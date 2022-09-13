@@ -326,38 +326,44 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
     fill_value : float, optional (default: None)
         Fill values to be masked, e.g. -9999 as a common convention.
     latname : str, optional (default: "lat")
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the latitude data variable, otherwise must be the name of the
-        latitude coordinate.
+        Name of the latitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
     lonname : str, optional (default: "lon")
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the longitude data variable, otherwise must be the name of the
-        longitude coordinate.
-    timename : str, optional (default: "time")
-        The name of the time coordinate.
-    latdim : str, optional (default: None)
-        The name of the latitude dimension in case it's not the same as the
-        latitude coordinate variable. For curvilinear grids it should be the
-        first dimension of the coordinate dimensions.
-    londim : str, optional (default: None)
-        The name of the longitude dimension in case it's not the same as the
-        longitude coordinate variable. For curvilinear grids it should be the
-        first dimension of the coordinate dimensions.
+        Name of the longitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
+    timename : str, optional (default: None)
+        The name of the time coordinate. Default is "time".
+    ydim : str, optional (default: None)
+        The name of the latitude/y dimension in case it's not the same as the
+        dimension on the latitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
+    xdim : str, optional (default: None)
+        The name of the longitude/x dimension in case it's not the same as the
+        dimension on the longitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
     locdim : str, optional (default: None)
         The name of the location dimension for non-rectangular grids. If this
         is given, you *MUST* provide `lonname` and `latname`.
     lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
-        by giving (start, stop, step) or an array of latitude values
+        by giving (start, stop, step) or an array of latitude values. In this
+        case `lon` also has to be specified.
     lon : tuple or np.ndarray, optional (default: None)
         If the longitude can not be inferred from the dataset you can specify
-        it by giving (start, stop, step) or an array of longitude values.
-    curvilinear : bool, optional (default: False)
-        Whether the grid is curvilinear, i.e. is a 2D grid, but not a regular
-        lat-lon grid. In this case, `latname` and `lonname` must be given, and
-        must be names of the variables containing the 2D latitude and longitude
-        values. Additionally, `latdim` and `londim` must be given and will be
-        interpreted as vertical and horizontal dimension.
+        it by giving (start, stop, step) or an array of longitude values. In
+        this case, `lat` also has to be specified.
+    gridtype : str, optional (default: "infer")
+        Type of the grid, one of "regular", "curvilinear", or "unstructured".
+        By default, gridtype is inferred ("infer"). If `locdim` is passed, it
+        is assumed that the grid is unstructured, and that latitude and
+        longitude are 1D arrays. Otherwise, `gridtype` will be set to
+        "curvilinear" if the coordinate arrays are 2-dimensional, and to
+        "regular" if the coordinate arrays are 1-dimensional.
+        Normally gridtype should be set to "infer". Only if the coordinate
+        arrays are 2-dimensional but correspond to a tensor product of two
+        1-dimensional coordinate arrays, it can be set to "regular" explicitly.
+        In this case the 1-dimensional coordinate arrays are inferred from the
+        2-dimensional arrays.
     landmask : xr.DataArray or str, optional (default: None)
         A land mask to be applied to reduce storage size. This can either be a
         xr.DataArray of the same shape as the dataset images with ``False`` at
@@ -405,19 +411,19 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         skip_missing: bool = False,
         discard_attrs: bool = False,
         fill_value: float = None,
-        latname: str = "lat",
-        lonname: str = "lon",
-        timename: str = "time",
-        latdim: str = None,
-        londim: str = None,
+        latname: str = None,
+        lonname: str = None,
+        timename: str = None,
+        ydim: str = None,
+        xdim: str = None,
         locdim: str = None,
         lat: np.ndarray = None,
         lon: np.ndarray = None,
-        curvilinear: bool = False,
+        gridtype: str = "infer",
+        construct_grid: bool = True,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        construct_grid: bool = True,
         average: str = None,
         timestamps: Sequence[pd.Timedelta] = None,
         use_tqdm: bool = True,
@@ -467,16 +473,16 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             timename=timename,
             latname=latname,
             lonname=lonname,
-            latdim=latdim,
-            londim=londim,
+            ydim=ydim,
+            xdim=xdim,
             locdim=locdim,
             lat=lat,
             lon=lon,
+            gridtype=gridtype,
+            construct_grid=construct_grid,
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
-            curvilinear=curvilinear,
-            construct_grid=construct_grid,
         )
 
         ######################################################################
@@ -518,7 +524,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
     def _open_dataset(self, fname: Union[Path, str]) -> xr.Dataset:
         """Returns data from file as xr.Dataset"""
         # can be overriden for custom datasets
-        return xr.open_dataset(fname, **self.open_dataset_kwargs)
+        return xr.load_dataset(fname, **self.open_dataset_kwargs)
 
     def _latlon_from_dataset(
         self, fname: Union[Path, str]

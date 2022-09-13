@@ -126,9 +126,8 @@ def _transpose(
 ):
     # Some reader settings need to be adapted for the duration of this routine
     if hasattr(reader, "open_dataset_kwargs"):
-        orig_cache = reader.open_dataset_kwargs.get("cache")
         orig_chunks = reader.open_dataset_kwargs.get("chunks")
-        reader.open_dataset_kwargs.update({"cache": False, "chunks": None})
+        reader.open_dataset_kwargs["chunks"] = None
     if hasattr(reader, "use_tqdm"):  # pragma: no branch
         orig_tqdm = reader.use_tqdm
         new_tqdm = stepsize == 1
@@ -294,9 +293,7 @@ def _transpose(
     if hasattr(reader, "use_tqdm"):  # pragma: no branch
         reader.use_tqdm = orig_tqdm
     if hasattr(reader, "open_dataset_kwargs"):  # pragma: no branch
-        reader.open_dataset_kwargs.update(
-            {"cache": orig_cache, "chunks": orig_chunks}
-        )
+        reader.open_dataset_kwargs["chunks"] = orig_chunks
 
     for fname in tmp_fnames.values():
         shutil.rmtree(fname)

@@ -1,7 +1,7 @@
 import datetime
 import numpy as np
 from pathlib import Path
-from typing import Iterable, Union
+from typing import Iterable, Union, Sequence
 import xarray as xr
 
 from .imagebase import ImageReaderBase
@@ -19,10 +19,7 @@ class StackImageReader(ImageReaderBase):
     Parameters
     ----------
     ds : xr.Dataset, Path or str
-        Xarray dataset (or filename of a netCDF file). Must have a time
-        coordinate and either `latname`/`latdim` and `lonname`/`latdim` (for a
-        regular latitude-longitude grid) or `locdim` as additional
-        coordinates/dimensions.
+        Xarray dataset (or filename of a netCDF file).
     varnames : str or list of str
         Names of the variable that should be read.
     level : dict, optional
@@ -35,42 +32,49 @@ class StackImageReader(ImageReaderBase):
         pass ``{"Y": {"level": 2}}``.
         In case you only want read a single variable, you can also pass the
         dictionary directly, e.g. ``{"level": 2}``.
-    timename : str, optional
-        The name of the time coordinate, default is "time".
     latname : str, optional (default: "lat")
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the latitude data variable, otherwise must be the name of the
-        latitude coordinate.
+        Name of the latitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
     lonname : str, optional (default: "lon")
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the longitude data variable, otherwise must be the name of the
-        longitude coordinate.
-    latdim : str, optional
-        The name of the latitude dimension in case it's not the same as the
-        latitude coordinate variable.
-    londim : str, optional
-        The name of the longitude dimension in case it's not the same as the
-        longitude coordinate variable.
-    locdim : str, optional
+        Name of the longitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
+    timename : str, optional (default: None)
+        The name of the time coordinate. Default is "time".
+    ydim : str, optional (default: None)
+        The name of the latitude/y dimension in case it's not the same as the
+        dimension on the latitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
+    xdim : str, optional (default: None)
+        The name of the longitude/x dimension in case it's not the same as the
+        dimension on the longitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
+    locdim : str, optional (default: None)
         The name of the location dimension for non-rectangular grids. If this
         is given, you *MUST* provide `lonname` and `latname`.
-    lat : tuple, optional (default: None)
+    lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
-        by giving (start, stop, step).
-    lon : tuple, optional (default: None)
+        by giving (start, stop, step) or an array of latitude values. In this
+        case `lon` also has to be specified.
+    lon : tuple or np.ndarray, optional (default: None)
         If the longitude can not be inferred from the dataset you can specify
-        it by giving (start, stop, step).
+        it by giving (start, stop, step) or an array of longitude values. In
+        this case, `lat` also has to be specified.
+    gridtype : str, optional (default: "infer")
+        Type of the grid, one of "regular", "curvilinear", or "unstructured".
+        By default, gridtype is inferred ("infer"). If `locdim` is passed, it
+        is assumed that the grid is unstructured, and that latitude and
+        longitude are 1D arrays. Otherwise, `gridtype` will be set to
+        "curvilinear" if the coordinate arrays are 2-dimensional, and to
+        "regular" if the coordinate arrays are 1-dimensional.
+        Normally gridtype should be set to "infer". Only if the coordinate
+        arrays are 2-dimensional but correspond to a tensor product of two
+        1-dimensional coordinate arrays, it can be set to "regular" explicitly.
+        In this case the 1-dimensional coordinate arrays are inferred from the
+        2-dimensional arrays.
     construct_grid : bool, optional (default: True)
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
         memory.
-    curvilinear : bool, optional
-        Whether the grid is curvilinear, i.e. is a 2D grid, but not a regular
-        lat-lon grid. In this case, `latname` and `lonname` must be given, and
-        must be names of the variables containing the 2D latitude and longitude
-        values. Additionally, `latdim` and `londim` must be given and will be
-        interpreted as vertical and horizontal dimension.
-        Default is False.
     landmask : xr.DataArray or str, optional
         A land mask to be applied to reduce storage size. This can either be a
         xr.DataArray of the same shape as the dataset images with ``False`` at
@@ -96,26 +100,28 @@ class StackImageReader(ImageReaderBase):
     def __init__(
         self,
         ds: Union[xr.Dataset, str, Path],
-        varnames: str,
+        varnames: Union[str, Sequence] = None,
         level: dict = None,
-        timename: str = "time",
-        latname: str = "lat",
-        lonname: str = "lon",
-        latdim: str = None,
-        londim: str = None,
+        timename: str = None,
+        latname: str = None,
+        lonname: str = None,
+        ydim: str = None,
+        xdim: str = None,
         locdim: str = None,
         lat: Union[np.ndarray, tuple] = None,
         lon: Union[np.ndarray, tuple] = None,
+        gridtype: str = "infer",
+        construct_grid: bool = True,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        curvilinear: bool = False,
-        construct_grid: bool = True,
         **open_dataset_kwargs,
     ):
 
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
+        if varnames is None:
+            varnames = list(ds.data_vars)
 
         super().__init__(
             ds,
@@ -123,15 +129,15 @@ class StackImageReader(ImageReaderBase):
             timename=timename,
             latname=latname,
             lonname=lonname,
-            latdim=latdim,
-            londim=londim,
+            ydim=ydim,
+            xdim=xdim,
             locdim=locdim,
             lat=lat,
             lon=lon,
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
-            curvilinear=curvilinear,
+            gridtype=gridtype,
             construct_grid=construct_grid,
         )
         self.data = ds

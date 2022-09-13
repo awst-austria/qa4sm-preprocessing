@@ -21,9 +21,9 @@ def test_write_transposed_dataset_given_chunks(synthetic_test_args):
     ds, kwargs = synthetic_test_args
     stack = StackImageReader(ds, ["X", "Y"], **kwargs)
 
-    if kwargs == {}:
+    if "lat" in ds.X.dims:
         chunks = {"lat": 5, "lon": 5}
-    elif "curvilinear" in kwargs:
+    elif "y" in ds.X.dims:
         chunks = {"y": 5, "x": 5}
     else:
         chunks = {"location": 25}
@@ -33,9 +33,9 @@ def test_write_transposed_dataset_given_chunks(synthetic_test_args):
     transposed = xr.open_zarr(transposed_path, consolidated=True)
     xr.testing.assert_equal(ds.transpose(..., "time"), transposed)
 
-    if kwargs == {}:
+    if "lat" in ds.X.dims:
         assert dict(transposed.chunks) == {"lat": (5,), "lon": (5, 5), "time": (20,)}
-    elif "curvilinear" in kwargs:
+    elif "y" in ds.X.dims:
         assert dict(transposed.chunks) == {"y": (5,), "x": (5, 5), "time": (20,)}
     else:
         assert dict(transposed.chunks) == {"location": (25, 25), "time": (20,)}

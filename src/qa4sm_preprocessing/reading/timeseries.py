@@ -110,8 +110,6 @@ class StackTs(ReaderBase):
     ):
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
-        if varnames is None:
-            varnames = list(ds.data_vars)
 
         super().__init__(
             ds,

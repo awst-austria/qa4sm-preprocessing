@@ -8,6 +8,7 @@ import cf_xarray  # noqa
 from pygeogrids.grids import gridfromdims, BasicGrid
 
 from .exceptions import ReaderError
+from .cf import get_coord, get_time
 
 
 class ReaderBase:
@@ -23,7 +24,7 @@ class ReaderBase:
     def __init__(
         self,
         ds: xr.Dataset,
-        varnames: Union[str, Sequence],
+        varnames: Union[str, Sequence] = None,
         timename: str = None,
         latname: str = None,
         lonname: str = None,
@@ -39,12 +40,14 @@ class ReaderBase:
         construct_grid: bool = True,
     ):
         # variable names
-        if isinstance(varnames, str):
+        if varnames is None:
+            varnames = list(ds.data_vars)
+        elif isinstance(varnames, str):
             varnames = [varnames]
         self.varnames = list(varnames)
         if timename is None:
             if isinstance(ds, xr.Dataset):
-                timename = ds.cf["time"].name
+                timename = get_time(ds).name
             else:
                 timename = "time"
         self.timename = timename
@@ -178,21 +181,8 @@ class ReaderBase:
     def _latlon_from_dataset(self, ds):
         if self.latname is None and self.lonname is None:
             # get specifications from CF conventions
-            try:
-                # even if CF convention attributes have not been set this works
-                # if there is a "latitude" and "longitude" array
-                lat = ds.cf["latitude"]
-                lon = ds.cf["longitude"]
-            except KeyError:
-                # if CF conventions don't work, we test "lat"/"lon"
-                if "lat" in ds and "lon" in ds:
-                    lat = ds.lat
-                    lon = ds.lon
-                else:  # pragma: no cover
-                    ReaderError(
-                        "Unable to infer latname/lonname. Consider specifying"
-                        " them as keyword argument"
-                    )
+            lat = get_coord(ds, "latitude", alternatives=["lat", "LAT"])
+            lon = get_coord(ds, "longitude", alternatives=["lon", "LON"])
         elif self.latname is not None and self.lonname is not None:
             lat = ds[self.latname]
             lon = ds[self.lonname]
@@ -249,7 +239,7 @@ class ReaderBase:
 
         if hasattr(self, "landmask") and self.landmask is not None:
             landmask = self._stack(self.landmask)
-            land_gpis = grid.get_grid_points()[0][landmask]
+            land_gpis = grid.get_grid_points()[0][landmask.values]
             grid = grid.subgrid_from_gpis(land_gpis)
 
         # bounding box

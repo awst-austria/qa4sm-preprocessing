@@ -2,8 +2,8 @@ import numpy as np
 from pygeogrids.grids import BasicGrid
 
 
-def validate_reader(reader, dataset, timename="time", grid=True):
-    expected_timestamps = dataset.indexes[timename]
+def validate_reader(reader, dataset, grid=True):
+    expected_timestamps = dataset.indexes[reader.timename]
     assert len(reader.timestamps) == len(expected_timestamps)
     assert np.all(list(reader.timestamps) == expected_timestamps)
 
@@ -13,7 +13,7 @@ def validate_reader(reader, dataset, timename="time", grid=True):
         assert reader.grid is None
 
     # check if read_block gives the correct result for the first image
-    expected_img = dataset.sel(**{timename: reader.timestamps[0]})
+    expected_img = dataset.sel(**{reader.timename: reader.timestamps[0]})
     img = reader.read_block(reader.timestamps[0], reader.timestamps[0])
     assert expected_img.attrs == reader.global_attrs
     assert expected_img.attrs == img.attrs

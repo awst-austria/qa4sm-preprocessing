@@ -143,22 +143,22 @@ def test_directory_image_reader_missing_varname(synthetic_test_args):
 def test_directory_image_reader_missing_varname_level_rename(synthetic_test_args):
     # tests whether skipping missing variables works
     ds, kwargs = synthetic_test_args
-    ds = ds[["X"]]
-    new_ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
+    new_ds = xr.concat((ds[["X"]], ds[["X"]] * 2), dim="level").transpose(..., "level")
+    new_ds["Y"] = ds["Y"]
     new_ds = new_ds.rename({"X": "newX"})
     make_clean_testdir()
     write_images(new_ds, test_data_path / "synthetic", "synthetic")
     with pytest.warns(
-        UserWarning, match="Skipping variable 'Y' because it does not exist!"
+        UserWarning, match="Skipping variable 'Z' because it does not exist!"
     ):
         # skipping a variable raises a warning
         reader = DirectoryImageReader(
             test_data_path / "synthetic",
-            ["X", "Y"],
+            ["X", "Y", "Z"],
             fmt="synthetic_%Y%m%dT%H%M.nc",
             skip_missing=True,
-            rename={"newX_0": "X", "newY": "Y"},
-            level={"newX": {"level": [0]}, "newY": {"level": 0}},
+            rename={"newX_0": "X", "newZ": "Z"},
+            level={"newX": {"level": [0]}, "newZ": {"level": 0}},
             **kwargs
         )
     validate_reader(reader, ds)
@@ -295,7 +295,7 @@ def test_directory_image_reader_nondefault_names(synthetic_test_args):
         timename="newtime",
         **kwargs
     )
-    validate_reader(reader, ds, timename="newtime")
+    validate_reader(reader, ds)
     make_clean_testdir()
 
 

@@ -29,7 +29,7 @@ def test_output_path(tmpdir_factory):
 
 def make_regular_test_dataset():
     rng = np.random.default_rng(42)
-    nlat, nlon, ntime = 5, 10, 20
+    nlat, nlon, ntime = 2, 4, 8
     lat = np.linspace(0, 1, nlat)
     lon = np.linspace(0, 1, nlon)
     time = pd.date_range("2000", periods=ntime, freq="D")
@@ -56,7 +56,7 @@ def regular_test_dataset():
 
 def make_curvilinear_test_dataset():
     rng = np.random.default_rng(42)
-    nlat, nlon, ntime = 5, 10, 20
+    nlat, nlon, ntime = 2, 4, 8
     lat = np.linspace(0, 1, nlat)
     lon = np.linspace(0, 1, nlon)
     LON, LAT = np.meshgrid(lon, lat)

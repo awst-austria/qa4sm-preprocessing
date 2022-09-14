@@ -31,7 +31,7 @@ def test_cf_conventions(synthetic_test_args):
     else:
         assert reader.ydim == "location"
         assert reader.xdim == "location"
-    validate_reader(reader, ds, timename="mytime")
+    validate_reader(reader, ds)
 
 
 def test_latitude_longitude(synthetic_test_args):
@@ -40,6 +40,17 @@ def test_latitude_longitude(synthetic_test_args):
     reader = StackImageReader(ds, **kwargs)
     assert reader.latname == "latitude"
     assert reader.lonname == "longitude"
+    validate_reader(reader, ds)
+
+
+def test_LaTitude_LonGitude(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    ds = ds.rename({"lat": "LaTitude", "lon": "LonGitude"})
+    ds.LaTitude.attrs["long_name"] = "LaTitude"
+    ds.LonGitude.attrs["long_name"] = "LonGitude"
+    reader = StackImageReader(ds, **kwargs)
+    assert reader.latname == "LaTitude"
+    assert reader.lonname == "LonGitude"
     validate_reader(reader, ds)
 
 
@@ -62,4 +73,12 @@ def test_2d_to_1d(curvilinear_test_dataset):
         .rename({"y": "lat", "x": "lon"})
         .assign_coords({"lat": ("lat", lat), "lon": ("lon", lon)})
     )
+    validate_reader(reader, ds)
+
+
+def test_no_time(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    ds = ds.rename({"time": "z"})
+    reader = StackImageReader(ds, **kwargs)
+    assert reader.timename == "z"
     validate_reader(reader, ds)

@@ -92,6 +92,16 @@ class StackImageReader(ImageReaderBase):
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
         memory.
+    timeoffsetvarname : str, optional (default: None)
+        Sometimes an image is not really an image (i.e. a snapshot at a fixed
+        time), but is composed of multiple observations at different times
+        (e.g. satellite overpasses). In these cases, image files often contain
+        a time offset variable, that gives the exact observation time.
+        Time offset is calculated after applying `rename`, so
+        `timeoffsetvarname` should be the renamed variable name.
+    timeoffsetunit : str, optional (default: None)
+        The unit of the time offset. Required if `timeoffsetvarname` is not
+        ``None``. Valid values are "seconds", "minutes", "hours", "days".
     **open_dataset_kwargs : keyword arguments
        Additional keyword arguments passed to ``xr.open_dataset`` in case `ds`
        is a filename.
@@ -115,11 +125,14 @@ class StackImageReader(ImageReaderBase):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        timeoffsetvarname=None,
+        timeoffsetunit=None,
         **open_dataset_kwargs,
     ):
 
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
+        varnames = self._maybe_add_varnames(varnames, [timeoffsetvarname])
 
         super().__init__(
             ds,
@@ -140,6 +153,8 @@ class StackImageReader(ImageReaderBase):
         )
         self.data = ds
         self._timestamps = ds.indexes[self.timename].to_pydatetime()
+        self.timeoffsetvarname = timeoffsetvarname
+        self.timeoffsetunit = timeoffsetunit
 
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime

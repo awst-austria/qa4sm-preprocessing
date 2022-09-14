@@ -277,6 +277,16 @@ class ReaderBase:
                 img = img.stack(dimensions={"loc": (self.ydim, self.xdim)})
         return img
 
+    def _maybe_add_varnames(self, varnames, to_add):
+        if varnames is None:
+            return varnames
+        if isinstance(varnames, str):
+            varnames = [varnames]
+        for vname in to_add:
+            if vname is not None and vname not in varnames:
+                varnames.append(vname)
+        return varnames
+
 
 class LevelSelectionMixin:
     def normalize_level(self, level, varnames):

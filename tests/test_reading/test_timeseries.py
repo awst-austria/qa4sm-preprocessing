@@ -1,5 +1,7 @@
 import numpy as np
+import pandas as pd
 import shutil
+import xarray as xr
 
 from qa4sm_preprocessing.reading import StackTs, GriddedNcOrthoMultiTs, StackImageReader
 
@@ -28,7 +30,7 @@ def test_StackTs_locdim(unstructured_test_dataset):
         ts = reader.read(lon, lat)["X"]
         assert np.all(ts == ref)
 
-        
+
 def test_GriddedNcOrthoMultiTs(synthetic_test_args):
 
     ds, kwargs = synthetic_test_args
@@ -52,10 +54,72 @@ def test_GriddedNcOrthoMultiTs(synthetic_test_args):
     assert tsreader.ioclass_kws["read_bulk"] is False
     tsreader = GriddedNcOrthoMultiTs(tspath, ioclass_kws={"read_bulk": False})
     assert tsreader.ioclass_kws["read_bulk"] is False
-    tsreader = GriddedNcOrthoMultiTs(tspath, ioclass_kws={"read_bulk": False}, read_bulk=False)
+    tsreader = GriddedNcOrthoMultiTs(
+        tspath, ioclass_kws={"read_bulk": False}, read_bulk=False
+    )
     assert tsreader.ioclass_kws["read_bulk"] is False
-    with pytest.warns(
-        UserWarning, match="read_bulk=False but"
-    ):
-        tsreader = GriddedNcOrthoMultiTs(tspath, ioclass_kws={"read_bulk": True}, read_bulk=False)
+    with pytest.warns(UserWarning, match="read_bulk=False but"):
+        tsreader = GriddedNcOrthoMultiTs(
+            tspath, ioclass_kws={"read_bulk": True}, read_bulk=False
+        )
         assert tsreader.ioclass_kws["read_bulk"] is False
+
+
+def test_StackTs_timeoffset(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    ds["time_offset"] = xr.ones_like(ds.X)
+    reader = StackTs(
+        ds, timeoffsetvarname="time_offset", timeoffsetunit="seconds", **kwargs
+    )
+
+    df = reader.read(0)
+    assert list(df.columns) == ["X", "Y"]
+    assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
+
+
+def test_StackTs_timevar(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    newtime = xr.ones_like(ds.X)
+    newtime = (newtime.T + np.arange(len(ds.time))*86400).T
+    newtime.attrs["units"] = "seconds since 2000-01-01"
+    newtime.attrs["long_name"] = "exact observation time"
+    ds["exact_time"] = newtime
+    reader = StackTs(
+        ds, timevarname="exact_time", **kwargs
+    )
+    df = reader.read(0)
+    assert list(df.columns) == ["X", "Y"]
+    assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
+
+
+def test_GriddedNcOrthoMultiTs_timeoffset(synthetic_test_args):
+
+    ds, kwargs = synthetic_test_args
+    ds["time_offset"] = xr.ones_like(ds.X)
+    stack = StackImageReader(ds, **kwargs)
+
+    tspath = test_data_path / "ts_test_path"
+    # time_offset should be detected by default
+    tsreader = stack.repurpose(tspath, overwrite=True)
+
+    df = tsreader.read(0)
+    assert list(df.columns) == ["X", "Y"]
+    assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
+
+
+def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
+
+    ds, kwargs = synthetic_test_args
+    newtime = xr.ones_like(ds.X)
+    newtime = (newtime.T + np.arange(len(ds.time))*86400).T
+    newtime.attrs["units"] = "seconds since 2000-01-01"
+    newtime.attrs["long_name"] = "exact observation time"
+    ds["exact_time"] = newtime
+    stack = StackImageReader(ds, **kwargs)
+
+    tspath = test_data_path / "ts_test_path"
+    tsreader = stack.repurpose(tspath, timevarname="exact_time", overwrite=True)
+
+    df = tsreader.read(0)
+    assert list(df.columns) == ["X", "Y"]
+    assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))

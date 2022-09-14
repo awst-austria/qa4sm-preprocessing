@@ -56,3 +56,10 @@ def test_infer_chunksizes():
     target_size = 4 * np.prod(chunksizes) / 1024**2
     assert infer_chunksizes(dimsizes, target_size, np.float32) == chunksizes
     assert infer_chunksizes(dimsizes, target_size, 4) == chunksizes
+
+def test_numpy_timeoffsetunit():
+    assert numpy_timeoffsetunit("seconds") == "s"
+    assert numpy_timeoffsetunit("minutes") == "m"
+    assert numpy_timeoffsetunit("hours") == "h"
+    assert numpy_timeoffsetunit("days") == "D"
+

@@ -1,4 +1,6 @@
 import numpy as np
+import xarray as xr
+
 from qa4sm_preprocessing.reading import (
     StackImageReader,
 )
@@ -69,7 +71,7 @@ def test_2d_to_1d(curvilinear_test_dataset):
 
     # transform the dataset to the regular grid structure
     ds = (
-        ds.drop(["lat", "lon"])
+        ds.drop_vars(["lat", "lon"])
         .rename({"y": "lat", "x": "lon"})
         .assign_coords({"lat": ("lat", lat), "lon": ("lon", lon)})
     )
@@ -82,3 +84,15 @@ def test_no_time(synthetic_test_args):
     reader = StackImageReader(ds, **kwargs)
     assert reader.timename == "z"
     validate_reader(reader, ds)
+
+
+def test_coordinate_metadata(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    reader = StackImageReader(ds, **kwargs)
+
+    block = reader.read_block()
+    assert block.lat.attrs["units"] == "degrees_north"
+    assert block.lon.attrs["units"] == "degrees_east"
+    assert block.lat.attrs["standard_name"] == "latitude"
+    assert block.lon.attrs["standard_name"] == "longitude"
+    assert block.time.attrs["standard_name"] == "time"

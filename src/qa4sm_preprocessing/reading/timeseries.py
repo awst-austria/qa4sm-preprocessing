@@ -1,4 +1,4 @@
-import cftime
+from abc import abstractmethod
 import numpy as np
 import os
 import pandas as pd
@@ -11,9 +11,40 @@ from pygeogrids.netcdf import load_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 
 from .base import ReaderBase
+from .utils import numpy_timeoffsetunit
 
 
-class StackTs(ReaderBase):
+class _TimeModificationMixin:
+
+    @abstractmethod
+    def _get_time_unit(self):  # pragma: no cover
+        ...
+
+    def _modify_time(self, df):
+        if self.timevarname is not None and self.timevarname in df:
+            cf_unit = self._get_time_unit()
+            unit, _, start_date = cf_unit.split(" ")
+            np_unit = numpy_timeoffsetunit(unit)
+            start = np.datetime64(start_date)
+            values = df[self.timevarname].values
+            # careful: the conversion to timedelta64 will lose all decimals, so
+            # make sure that the time unit is small enough to represent all
+            # timestamps as integers
+            times = start + values.astype(f"timedelta64[{np_unit}]")
+            index = pd.DatetimeIndex(times)
+            df.index = index
+            df.drop(self.timevarname, axis="columns", inplace=True)
+        if self.timeoffsetvarname is not None and self.timeoffsetvarname in df:
+            times = df.index.values
+            unit = numpy_timeoffsetunit(self.timeoffsetunit)
+            offset = df[self.timeoffsetvarname].values
+            delta = offset.astype(f"timedelta64[{unit}]")
+            df.index = pd.DatetimeIndex(times + delta)
+            df.drop(self.timeoffsetvarname, axis="columns", inplace=True)
+        return df
+
+
+class StackTs(ReaderBase, _TimeModificationMixin):
     """
     Wrapper for xarray.Dataset when timeseries of the data should be read.
 
@@ -84,6 +115,19 @@ class StackTs(ReaderBase):
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
         memory.
+    timevarname : str, optional (default: None)
+        Name of the time variable (absolute time) to use instead of the
+        original timestamps.
+    timeoffsetvarname : str, optional (default: None)
+        Sometimes an image is not really an image (i.e. a snapshot at a fixed
+        time), but is composed of multiple observations at different times
+        (e.g. satellite overpasses). In these cases, image files often contain
+        a time offset variable, that gives the exact observation time.
+        Time offset is calculated after applying `rename`, so
+        `timeoffsetvarname` should be the renamed variable name.
+    timeoffsetunit : str, optional (default: None)
+        The unit of the time offset. Required if `timeoffsetvarname` is not
+        ``None``. Valid values are "seconds", "minutes", "hours", "days".
     **open_dataset_kwargs : keyword arguments
        Additional keyword arguments passed to ``xr.open_dataset`` in case `ds`
        is a filename.
@@ -106,10 +150,14 @@ class StackTs(ReaderBase):
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
+        timevarname=None,
+        timeoffsetvarname=None,
+        timeoffsetunit=None,
         **open_dataset_kwargs,
     ):
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
+        varnames = self._maybe_add_varnames(varnames, [timevarname, timeoffsetvarname])
 
         super().__init__(
             ds,
@@ -137,6 +185,10 @@ class StackTs(ReaderBase):
             self.data = self.orig_data.stack({"loc": (self.ydim, self.xdim)})
             self.locdim = "loc"
 
+        self.timevarname = timevarname
+        self.timeoffsetvarname = timeoffsetvarname
+        self.timeoffsetunit = timeoffsetunit
+
     def read(self, *args, **kwargs) -> pd.Series:
         """
         Reads variable timeseries from dataset.
@@ -154,7 +206,7 @@ class StackTs(ReaderBase):
         """
         if len(args) == 1:
             gpi = args[0]
-            if self.gridtype != "unstructured":
+            if self.gridtype == "regular":
                 lon, lat = self.grid.gpi2lonlat(gpi)
 
         elif len(args) == 2:
@@ -163,28 +215,31 @@ class StackTs(ReaderBase):
             if self.gridtype == "unstructured":
                 gpi = self.grid.find_nearest_gpi(lon, lat)[0]
                 if not isinstance(gpi, np.integer):  # pragma: no cover
-                    raise ValueError(
-                        f"No gpi near (lon={lon}, lat={lat}) found"
-                    )
+                    raise ValueError(f"No gpi near (lon={lon}, lat={lat}) found")
         else:  # pragma: no cover
             raise ValueError(
                 f"args must have length 1 or 2, but has length {len(args)}"
             )
 
-        if self.gridtype == "unstructured":
-            data = self.data[{self.locdim: gpi}]
-        else:
+        if self.gridtype == "regular":
             data = self.orig_data.sel(lat=lat, lon=lon)
+        else:
+            data = self.data[{self.locdim: gpi}]
         df = data.to_pandas()[self.varnames]
-        return df
+        return self._modify_time(df)
+
+    def _get_time_unit(self):
+        return self.data[self.timevarname].attrs["units"]
 
 
-class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
+class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
     def __init__(
         self,
         ts_path,
         grid_path=None,
         timevarname=None,
+        timeoffsetvarname="time_offset",
+        timeoffsetunit="seconds",
         read_bulk=None,
         kd_tree_name="pykdtree",
         **kwargs,
@@ -205,8 +260,14 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
             memory, and subsequent calls to read_ts read from the cache and not
             from disk this makes reading complete files faster.
         timevarname : str, optional (default: None)
-            Name of the time variable to use instead of the original
-            timestamps.
+            Name of the time variable (absolute time) to use instead of the
+            original timestamps.
+        timeoffsetvarname : str, optional (default: None)
+            Name of the time offset variable name (relative to original
+            timestamps).
+        timeoffsetunit : str, optional (default: None)
+            The unit of the time offset. Required if `timeoffsetvarname` is not
+            ``None``. Valid values are "seconds"/, "minutes", "hours", "days".
         kd_tree_name : str, optional (default: "pykdtree")
             Name of the Kd-tree engine used in the grid. Available options are
             "pykdtree" and "scipy".
@@ -242,10 +303,7 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         if read_bulk is None:
             read_bulk = ioclass_kws.get("read_bulk", True)
         else:
-            if (
-                "read_bulk" in ioclass_kws
-                and read_bulk != ioclass_kws["read_bulk"]
-            ):
+            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
                 warnings.warn(
                     f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
                     f" {ioclass_kws['read_bulk']}. The first takes precedence."
@@ -253,13 +311,13 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         ioclass_kws["read_bulk"] = read_bulk
         super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
         self.timevarname = timevarname
+        self.timeoffsetvarname = timeoffsetvarname
+        self.timeoffsetunit = timeoffsetunit
 
     def read(self, *args, **kwargs) -> pd.DataFrame:
         df = super().read(*args, **kwargs)
-        if self.timevarname is not None:
-            unit = self.fid.dataset.variables[self.timevarname].units
-            times = df[self.timevarname].values
-            index = pd.DatetimeIndex(cftime.num2pydate(times, unit))
-            df.index = index
-            df.drop(self.timevarname, axis="columns", inplace=True)
+        df = self._modify_time(df)
         return df
+
+    def _get_time_unit(self):
+        return self.fid.dataset.variables[self.timevarname].units

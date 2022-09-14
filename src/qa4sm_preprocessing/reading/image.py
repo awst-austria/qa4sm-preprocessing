@@ -201,7 +201,6 @@ don't contain timestamps, it might be necessary to also override
 detail here, but it works similar to the other examples.
 """
 
-import cftime
 import dask
 import datetime
 import numpy as np
@@ -456,10 +455,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             varnames, timeoffsetvarname, rename, level, skip_missing
         )
         self.timeoffsetvarname = timeoffsetvarname
-        if self.timeoffsetvarname is not None:
-            assert timeoffsetunit is not None
-            self.timeoffsetunit = timeoffsetunit.lower()[0]
-            assert self.timeoffsetunit in ["s", "m", "h", "d"]
+        self.timeoffsetunit = timeoffsetunit
         self.rename = rename
         self.level = level
         self.transpose = transpose
@@ -720,29 +716,8 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             ds = ds.rename(self.rename)
         return ds
 
-    def _convert_timeoffset(self, ds, fname) -> xr.Dataset:
-        if self.timeoffsetvarname is not None:
-            var = self.timeoffsetvarname
-            assert (
-                "since" not in self.timeoffsetunit
-            ), "time offset units must be relative to current timestamp"
-            timestamp = self._tstamps_in_file(fname)[0]
-            start_date = cftime.num2date(0, f"days since {str(timestamp)}")
-            start = cftime.date2num(start_date, "days since 1900-01-01")
-
-            conversion = {"s": 86400, "m": 24 * 60, "h": 24, "d": 1}[
-                self.timeoffsetunit
-            ]
-            # start = pd.to_datetime(timestamp).to_julian_date()
-            time = start + ds[var] / conversion
-            ds[var] = time
-            ds[var].attrs["units"] = "days since 1900-01-01"
-            ds[var].attrs["long_name"] = "Observation time"
-        return ds
-
     def _open_nice_dataset(self, fname) -> xr.Dataset:
         ds = self._make_nicer_ds(self._open_dataset(fname))
-        ds = self._convert_timeoffset(ds, fname)
         return ds
 
     def _fix_varnames_rename_level(
@@ -770,10 +745,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         #
         # (note the missing LAI, since we derive the map from the variables
         # in the file)
-        if isinstance(varnames, str):
-            varnames = [varnames]
-        if timeoffsetvarname is not None and timeoffsetvarname not in varnames:
-            varnames.append(timeoffsetvarname)
+        varnames = self._maybe_add_varnames(varnames, [timeoffsetvarname])
         level = self.normalize_level(level, varnames)
         if skip_missing:
             # Be careful: skip_missing only works if _open_dataset does not do

@@ -49,7 +49,8 @@ def get_coord(ds, standardname, alternatives=[]):
 def get_time(ds):
     try:
         time = get_coord(ds, "time")
-    except ReaderError:
+        assert time.ndim == 1
+    except (ReaderError, AssertionError):
         candidates = []
         candidates = list(
             filter(

@@ -175,7 +175,7 @@ class ReaderBase:
         lon = np.asarray(lon)
         return lat, lon, latname, lonname, ydim, xdim
 
-    def _latlon_from_dataset(self, ds) -> Tuple(xr.DataArray, xr.DataArray):
+    def _latlon_from_dataset(self, ds) -> Tuple[xr.DataArray, xr.DataArray]:
         if self.latname is None and self.lonname is None:
             # get specifications from CF conventions
             lat = get_coord(ds, "latitude", alternatives=["lat", "LAT"])

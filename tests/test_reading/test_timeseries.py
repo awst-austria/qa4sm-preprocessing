@@ -84,8 +84,11 @@ def test_StackTs_timevar(synthetic_test_args):
     newtime.attrs["units"] = "seconds since 2000-01-01"
     newtime.attrs["long_name"] = "exact observation time"
     ds["exact_time"] = newtime
+    # compared to test_StackTs_timeoffset we specify the varnames explicitly
+    # here, so we cover also the case where varnames are given but the
+    # timevarname is not included
     reader = StackTs(
-        ds, timevarname="exact_time", **kwargs
+        ds, ["X", "Y"], timevarname="exact_time", **kwargs
     )
     df = reader.read(0)
     assert list(df.columns) == ["X", "Y"]

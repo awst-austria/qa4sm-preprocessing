@@ -41,10 +41,10 @@ The main routines that should be modified when subclassing are:
   with other options. Should not be necessary very often.
 * ``_read_single_file``: normally this calls ``_open_dataset`` and then returns
   the data as dictionary that maps from variable names to 3d data arrays (numpy
-  or dask). If it is hard to read the data as xr.Dataset, so that overriding
-  `_open_dataset` is not feasible, this could be overriden instead, but then
-  all the other routines for obtaining grid/metadata/landmask info also have to
-  be overriden.
+  or dask, dimensions should be time, lat, lon). If it is hard to read the data
+  as xr.Dataset, so that overriding `_open_dataset` is not feasible, this could
+  be overriden instead, but then all the other routines for obtaining
+  grid/metadata/landmask info also have to be overriden.
 
 In the following some examples for subclassing are provided.
 
@@ -133,18 +133,6 @@ grid). A reader could look like this::
     class SmapSMReader(DirectoryImageReader):
 
         def __init__(self, directory):
-            self.overpass_dict = {
-                "AM": {
-                    "group": "Soil_Moisture_Retrieval_Data_AM",
-                    "sm": "soil_moisture",
-                    "qc": "retrieval_qual_flag",
-                },
-                "PM": {
-                    "group": "Soil_Moisture_Retrieval_Data_PM",
-                    "sm": "soil_moisture_dca_pm",
-                    "qc": "retrieval_qual_flag_dca_pm",
-                }
-            }
 
             super().__init__(
                 directory,
@@ -157,6 +145,9 @@ grid). A reader could look like this::
             )
 
         def _open_dataset(self, fname):
+            # This function only reads the actual data, but not the coordinates
+            # to avoid having to read and construct the coordinates in every
+            # step.
             sm_arrs = []
             with h5py.File(fname, "r") as f:
                 for op in ["AM", "PM"]:
@@ -164,13 +155,15 @@ grid). A reader could look like this::
                     sm_arrs.append(sm)
             # Now we have read the AM and PM retrievals, but we still need to
             # concatenate them along a new time axis. We don't have to set the
-            # actual time values though, since they will be inferred from the
-            # filename in combination with the timestamps passed in the
-            # constructor.
+            # actual time values, since they will be inferred from the filename
+            # in combination with the timestamps passed in the constructor.
             sm = xr.concat(sm_arrs, dim="time")
             return sm.to_dataset(name="SMAP_L3_SM")
 
         def _read_overpass(self, f, op):
+            # This function reads the data of a single overpass and puts it
+            # into a xarray Dataset, but without specifying coordinate values
+            # (only dimensions are set).
             names = self.overpass_dict[op]
             g = f[names["group"]]
             sm = np.ma.masked_equal(g[names["sm"]][...], -9999)
@@ -180,11 +173,30 @@ grid). A reader could look like this::
             return xr.DataArray(sm, dims=["lat", "lon"])
 
         def _latlon_from_dataset(self, fname):
+            # This method is called from the constructor of base.ReaderBase and
+            # should return latitude and longitude as xr.DataArrays
             with h5py.File(fname, "r") as f:
                 g = f["Soil_Moisture_Retrieval_Data_AM"]
-                lat = self.coord_from_2d(g["latitude"], 0, fill_value=-9999)
-                lon = self.coord_from_2d(g["longitude"], 1, fill_value=-9999)
+                # _1d_coord_from_2d is a function defined in base.ReaderBase
+                # reduces the 2D tensor product coordinates to 1D coordinates
+                lat = self._1d_coord_from_2d(g["latitude"], 0, fill_value=-9999)
+                lon = self._1d_coord_from_2d(g["longitude"], 1, fill_value=-9999)
             return lat, lon
+
+        @property
+        def overpass_dict(self):
+            return {
+                "AM": {
+                    "group": "Soil_Moisture_Retrieval_Data_AM",
+                    "sm": "soil_moisture",
+                    "qc": "retrieval_qual_flag",
+                },
+                "PM": {
+                    "group": "Soil_Moisture_Retrieval_Data_PM",
+                    "sm": "soil_moisture_dca_pm",
+                    "qc": "retrieval_qual_flag_dca_pm",
+                }
+            }
 
 In this example we also adapted ``_latlon_from_dataset``. Instead, we could
 have just read the latitude and longitude in ``_open_dataset`` and added them
@@ -227,7 +239,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
 
     It can be used to create a single image stack file, a transposed stack (via
     ``write_transposed_dataset``), or a cell-based timeseries dataset (via the
-    repurpose package).
+    ``repurpose`` method).
 
     The advantage over ``xr.open_mfdataset`` is that the reader typically does
     not need to open each dataset to get information on coordinates. Instead,
@@ -324,10 +336,10 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         data size).
     fill_value : float, optional (default: None)
         Fill values to be masked, e.g. -9999 as a common convention.
-    latname : str, optional (default: "lat")
+    latname : str, optional (default: None)
         Name of the latitude coordinate array in the dataset. If it is not
         given, it is inferred from the dataset using CF-conventions.
-    lonname : str, optional (default: "lon")
+    lonname : str, optional (default: None)
         Name of the longitude coordinate array in the dataset. If it is not
         given, it is inferred from the dataset using CF-conventions.
     timename : str, optional (default: None)
@@ -341,8 +353,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         dimension on the longitude array of the dataset. Must be specified if
         `lat` and `lon` are passed explicitly.
     locdim : str, optional (default: None)
-        The name of the location dimension for non-rectangular grids. If this
-        is given, you *MUST* provide `lonname` and `latname`.
+        The name of the location dimension for non-rectangular grids.
     lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
         by giving (start, stop, step) or an array of latitude values. In this

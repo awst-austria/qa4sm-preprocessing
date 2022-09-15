@@ -32,10 +32,10 @@ class StackImageReader(ImageReaderBase):
         pass ``{"Y": {"level": 2}}``.
         In case you only want read a single variable, you can also pass the
         dictionary directly, e.g. ``{"level": 2}``.
-    latname : str, optional (default: "lat")
+    latname : str, optional (default: None)
         Name of the latitude coordinate array in the dataset. If it is not
         given, it is inferred from the dataset using CF-conventions.
-    lonname : str, optional (default: "lon")
+    lonname : str, optional (default: None)
         Name of the longitude coordinate array in the dataset. If it is not
         given, it is inferred from the dataset using CF-conventions.
     timename : str, optional (default: None)
@@ -49,8 +49,7 @@ class StackImageReader(ImageReaderBase):
         dimension on the longitude array of the dataset. Must be specified if
         `lat` and `lon` are passed explicitly.
     locdim : str, optional (default: None)
-        The name of the location dimension for non-rectangular grids. If this
-        is given, you *MUST* provide `lonname` and `latname`.
+        The name of the location dimension for non-rectangular grids.
     lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
         by giving (start, stop, step) or an array of latitude values. In this

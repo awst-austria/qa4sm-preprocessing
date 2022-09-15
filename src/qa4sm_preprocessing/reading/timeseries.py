@@ -66,10 +66,10 @@ class StackTs(ReaderBase, _TimeModificationMixin):
         Xarray dataset (or filename of a netCDF file).
     varnames : str
         Names of the variable that should be read.
-    latname : str, optional (default: "lat")
+    latname : str, optional (default: None)
         Name of the latitude coordinate array in the dataset. If it is not
         given, it is inferred from the dataset using CF-conventions.
-    lonname : str, optional (default: "lon")
+    lonname : str, optional (default: None)
         Name of the longitude coordinate array in the dataset. If it is not
         given, it is inferred from the dataset using CF-conventions.
     timename : str, optional (default: None)
@@ -83,8 +83,7 @@ class StackTs(ReaderBase, _TimeModificationMixin):
         dimension on the longitude array of the dataset. Must be specified if
         `lat` and `lon` are passed explicitly.
     locdim : str, optional (default: None)
-        The name of the location dimension for non-rectangular grids. If this
-        is given, you *MUST* provide `lonname` and `latname`.
+        The name of the location dimension for non-rectangular grids.
     lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
         by giving (start, stop, step) or an array of latitude values. In this
@@ -277,7 +276,7 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
         parameters : list, optional (default: None)
             Specific variable names to read, if None are selected, all are
             read.
-        offsets : dict, optional (default:None)
+        offsets : dict, optional (default: None)
             Offsets (values) that are added to the parameters (keys)
         scale_factors : dict, optional (default:None)
             Offset (value) that the parameters (key) is multiplied with
@@ -285,7 +284,7 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
 
         Optional keyword arguments to pass to OrthoMultiTs class:
         ---------------------------------------------------------
-        read_dates : boolean, optional (default:False)
+        read_dates : boolean, optional (default: False)
             if false dates will not be read automatically but only on specific
             request useable for bulk reading because currently the netCDF
             num2date routine is very slow for big datasets

@@ -37,7 +37,6 @@ import pytest
 import shutil
 import xarray as xr
 
-from pygeogrids.grids import BasicGrid
 
 from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
@@ -47,41 +46,19 @@ from qa4sm_preprocessing.reading.write import write_images
 # this is defined in conftest.py
 from pytest import test_data_path
 
+from .utils import validate_reader
 
-def validate_reader(reader, dataset, timename="time", grid=True):
-    expected_timestamps = dataset.indexes[timename]
-    assert len(reader.timestamps) == len(expected_timestamps)
-    assert np.all(list(reader.timestamps) == expected_timestamps)
 
-    if grid:
-        assert isinstance(reader.grid, BasicGrid)
-    else:
-        assert reader.grid is None
+def make_clean_testdir():
+    path = test_data_path / "synthetic"
+    if path.exists():
+        shutil.rmtree(path)
 
-    # check if read_block gives the correct result for the first image
-    expected_img = dataset.sel(**{timename: reader.timestamps[0]})
-    img = reader.read_block(reader.timestamps[0], reader.timestamps[0])
-    assert expected_img.attrs == reader.global_attrs
-    assert expected_img.attrs == img.attrs
-    assert sorted(list(expected_img.data_vars)) == sorted(list(img.data_vars))
-    for var in img.data_vars:
-        np.testing.assert_equal(
-            img[var].values.squeeze(), expected_img[var].values.squeeze()
-        )
-
-    # check if read_block gives the correct result for the full block
-    block = reader.read_block()
-    assert dataset.attrs == reader.global_attrs
-    assert dataset.attrs == block.attrs
-    assert sorted(list(dataset.data_vars)) == sorted(list(block.data_vars))
-    for var in block.data_vars:
-        np.testing.assert_equal(
-            block[var].values.squeeze(), dataset[var].values.squeeze()
-        )
 
 
 def test_directory_image_reader_basic(synthetic_test_args):
     ds, kwargs = synthetic_test_args
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -90,25 +67,27 @@ def test_directory_image_reader_basic(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_incomplete_varnames(synthetic_test_args):
     # tests whether reading a single variable also works as expected
     ds, kwargs = synthetic_test_args
     ds = ds[["X"]]
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic", ["X"], fmt="synthetic_%Y%m%dT%H%M.nc", **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_renaming(synthetic_test_args):
     # tests whether renaming works
     ds, kwargs = synthetic_test_args
     test_ds = ds.rename({"X": "newX", "Y": "newY"})
+    make_clean_testdir()
     write_images(test_ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -118,13 +97,14 @@ def test_directory_image_reader_renaming(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_renaming_level(synthetic_test_args):
     ds, kwargs = synthetic_test_args
     new_ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
     new_ds = new_ds.rename({"X": "newX", "Y": "newY"})
+    make_clean_testdir()
     write_images(new_ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -136,13 +116,14 @@ def test_directory_image_reader_renaming_level(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_missing_varname(synthetic_test_args):
     # tests whether skipping missing variables works
     ds, kwargs = synthetic_test_args
     ds = ds[["X"]]
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     with pytest.warns(
         UserWarning, match="Skipping variable 'Y' because it does not exist!"
@@ -156,36 +137,38 @@ def test_directory_image_reader_missing_varname(synthetic_test_args):
             **kwargs
         )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_missing_varname_level_rename(synthetic_test_args):
     # tests whether skipping missing variables works
     ds, kwargs = synthetic_test_args
-    ds = ds[["X"]]
-    new_ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
+    new_ds = xr.concat((ds[["X"]], ds[["X"]] * 2), dim="level").transpose(..., "level")
+    new_ds["Y"] = ds["Y"]
     new_ds = new_ds.rename({"X": "newX"})
+    make_clean_testdir()
     write_images(new_ds, test_data_path / "synthetic", "synthetic")
     with pytest.warns(
-        UserWarning, match="Skipping variable 'Y' because it does not exist!"
+        UserWarning, match="Skipping variable 'Z' because it does not exist!"
     ):
         # skipping a variable raises a warning
         reader = DirectoryImageReader(
             test_data_path / "synthetic",
-            ["X", "Y"],
+            ["X", "Y", "Z"],
             fmt="synthetic_%Y%m%dT%H%M.nc",
             skip_missing=True,
-            rename={"newX_0": "X", "newY": "Y"},
-            level={"newX": {"level": [0]}, "newY": {"level": 0}},
+            rename={"newX_0": "X", "newZ": "Z"},
+            level={"newX": {"level": [0]}, "newZ": {"level": 0}},
             **kwargs
         )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_pattern(synthetic_test_args):
     # tests whether skipping files that don't match the pattern works
     ds, kwargs = synthetic_test_args
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     # add another netCDF file with a different filename that would make the
     # reader fail
@@ -198,12 +181,13 @@ def test_directory_image_reader_pattern(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_time_regex_pattern(synthetic_test_args):
     # tests whether the time regex pattern argument works
     ds, kwargs = synthetic_test_args
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -213,13 +197,14 @@ def test_directory_image_reader_time_regex_pattern(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_select_level(synthetic_test_args):
     # tests whether selecting from a level dimension works
     ds, kwargs = synthetic_test_args
     ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -233,7 +218,7 @@ def test_directory_image_reader_select_level(synthetic_test_args):
     newds = xr.merge((X, Y))
     newds.attrs = ds.attrs
     validate_reader(reader, newds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_select_level_single_var(synthetic_test_args):
@@ -241,6 +226,7 @@ def test_directory_image_reader_select_level_single_var(synthetic_test_args):
     # shorthand notation works
     ds, kwargs = synthetic_test_args
     ds = xr.concat((ds, ds * 2), dim="level").transpose(..., "level")
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -250,12 +236,13 @@ def test_directory_image_reader_select_level_single_var(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds[["X"]].isel(level=0))
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_discard_attrs(synthetic_test_args):
     # tests whether discarding metadata works
     ds, kwargs = synthetic_test_args
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -270,7 +257,7 @@ def test_directory_image_reader_discard_attrs(synthetic_test_args):
     ds["X"].attrs = {}
     ds["Y"].attrs = {}
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_fill_value(synthetic_test_args):
@@ -279,6 +266,7 @@ def test_directory_image_reader_fill_value(synthetic_test_args):
     ds["X"].values[ds.X.values < -0.5] = -9999
     ds["Y"].values[ds.Y.values < -0.5] = -9999
 
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -290,12 +278,13 @@ def test_directory_image_reader_fill_value(synthetic_test_args):
     ds["X"].values[ds.X.values == -9999] = np.nan
     ds["Y"].values[ds.Y.values == -9999] = np.nan
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_nondefault_names(synthetic_test_args):
     ds, kwargs = synthetic_test_args
     ds = ds.rename({"lat": "newlat", "lon": "newlon", "time": "newtime"})
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic", dim="newtime")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -306,23 +295,33 @@ def test_directory_image_reader_nondefault_names(synthetic_test_args):
         timename="newtime",
         **kwargs
     )
-    validate_reader(reader, ds, timename="newtime")
-    shutil.rmtree(test_data_path / "synthetic")
+    validate_reader(reader, ds)
+    make_clean_testdir()
 
 
 def test_directory_image_reader_latlon_from_array(synthetic_test_args):
     ds, kwargs = synthetic_test_args
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
+    dims = ds.X.dims
+    if len(dims) == 3:
+        # regular and curvilinear
+        _, ydim, xdim = dims
+    else:
+        ydim = dims[1]
+        xdim = dims[1]
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
         ["X", "Y"],
         fmt="synthetic_%Y%m%dT%H%M.nc",
         lat=ds.lat.values,
         lon=ds.lon.values,
+        ydim=ydim,
+        xdim=xdim,
         **kwargs
     )
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_latlon_from_2d(regular_test_dataset):
@@ -332,18 +331,19 @@ def test_directory_image_reader_latlon_from_2d(regular_test_dataset):
     ds["LAT"] = (["lat", "lon"], LAT)
     ds["LON"] = (["lat", "lon"], LON)
     ds = ds.drop_vars(["lat", "lon"])
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
         ["X", "Y"],
         fmt="synthetic_%Y%m%dT%H%M.nc",
         latname="LAT",
-        latdim="lat",
+        xdim="lat",
         lonname="LON",
-        londim="lon",
+        ydim="lon",
     )
     validate_reader(reader, orig_ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_landmask(synthetic_test_args):
@@ -352,6 +352,7 @@ def test_directory_image_reader_landmask(synthetic_test_args):
     ds["landmask"] = ds.X.isel(time=0) > -0.5
     ds["X"] = ds.X.where(ds.landmask)
     ds["Y"] = ds.X.where(ds.landmask)
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
 
     # test with array as landmask
@@ -374,11 +375,12 @@ def test_directory_image_reader_landmask(synthetic_test_args):
     )
     validate_reader(reader, ds[["X", "Y"]])
 
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_no_grid(synthetic_test_args):
     ds, kwargs = synthetic_test_args
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -388,7 +390,7 @@ def test_directory_image_reader_no_grid(synthetic_test_args):
         **kwargs
     )
     validate_reader(reader, ds, grid=False)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_averaging(synthetic_test_args):
@@ -397,6 +399,7 @@ def test_directory_image_reader_averaging(synthetic_test_args):
         ds.indexes["time"][0], periods=len(ds.indexes["time"]), freq="12H"
     )
     ds = ds.assign_coords({"time": newtime})
+    make_clean_testdir()
     write_images(ds, test_data_path / "synthetic", "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -408,7 +411,7 @@ def test_directory_image_reader_averaging(synthetic_test_args):
     newds = ds.resample(time="D").mean(keep_attrs=True)
     assert len(newds.time) == (len(ds.time) // 2)
     validate_reader(reader, newds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_multiple_timesteps(synthetic_test_args):
@@ -420,6 +423,7 @@ def test_directory_image_reader_multiple_timesteps(synthetic_test_args):
     )
     newtime += pd.Timedelta("6H")
     ds = ds.assign_coords({"time": newtime})
+    make_clean_testdir()
     write_images(
         ds, test_data_path / "synthetic", "synthetic", stepsize=2, fmt="%Y%m%d"
     )
@@ -435,7 +439,7 @@ def test_directory_image_reader_multiple_timesteps(synthetic_test_args):
     for tstamps in reader._file_tstamp_map.values():
         assert len(tstamps) == 2
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_multiple_timesteps_transposed(synthetic_test_args):
@@ -447,6 +451,7 @@ def test_directory_image_reader_multiple_timesteps_transposed(synthetic_test_arg
     newtime += pd.Timedelta("6H")
     ds = ds.assign_coords({"time": newtime})
     ds = ds.transpose(..., "time")
+    make_clean_testdir()
     write_images(
         ds, test_data_path / "synthetic", "synthetic", stepsize=2, fmt="%Y%m%d"
     )
@@ -460,7 +465,7 @@ def test_directory_image_reader_multiple_timesteps_transposed(synthetic_test_arg
     )
     ds = ds.transpose("time", ...)
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def _write_multistep_files(ds, directory, drop_time=False):
@@ -482,6 +487,7 @@ def test_directory_image_reader_multiple_timesteps_subset(synthetic_test_args):
         ds.indexes["time"][0], periods=len(ds.indexes["time"]), freq="6H"
     )
     ds = ds.assign_coords(time=newtime)
+    make_clean_testdir()
     _write_multistep_files(ds, test_data_path / "synthetic")
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -497,7 +503,7 @@ def test_directory_image_reader_multiple_timesteps_subset(synthetic_test_args):
     )
     ds = ds.isel(time=slice(0, 8))
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()
 
 
 def test_directory_image_reader_multiple_timesteps_subset_notime(synthetic_test_args):
@@ -508,6 +514,7 @@ def test_directory_image_reader_multiple_timesteps_subset_notime(synthetic_test_
         ds.indexes["time"][0], periods=len(ds.indexes["time"]), freq="6H"
     )
     ds = ds.assign_coords(time=newtime)
+    make_clean_testdir()
     _write_multistep_files(ds, test_data_path / "synthetic", drop_time=True)
     reader = DirectoryImageReader(
         test_data_path / "synthetic",
@@ -523,4 +530,4 @@ def test_directory_image_reader_multiple_timesteps_subset_notime(synthetic_test_
     )
     ds = ds.isel(time=slice(0, 8))
     validate_reader(reader, ds)
-    shutil.rmtree(test_data_path / "synthetic")
+    make_clean_testdir()

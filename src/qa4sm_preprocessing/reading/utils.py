@@ -74,3 +74,12 @@ def infer_chunksizes(dimsizes: Sequence, target_size: float, dtype) -> tuple:
     # the last chunks should be contiguous
     chunks.append(dimsizes[-1])
     return tuple(chunks)
+
+
+def numpy_timeoffsetunit(unit):
+    assert isinstance(unit, str)
+    unit = unit.lower()[0]
+    if unit == "d":
+        unit = "D"
+    assert unit in ["s", "m", "h", "D"]
+    return unit

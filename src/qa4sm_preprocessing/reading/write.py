@@ -16,6 +16,7 @@ def write_images(
     memory: float = 5,
     stepsize: int = 1,
     invertlats: bool = False,
+    includetime: bool = True,
 ):
     """
     Writes a xr.Dataset as images to a directory.
@@ -66,6 +67,8 @@ def write_images(
             img = stack.sel(
                 **{dim: stack.indexes[dim][timeidx : timeidx + stepsize]}
             )
+            if not includetime and stepsize == 1:
+                img = img.drop_vars(dim).isel(**{dim: 0})
             img.to_netcdf(
                 fname,
                 encoding={

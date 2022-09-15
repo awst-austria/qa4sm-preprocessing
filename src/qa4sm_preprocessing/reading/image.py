@@ -41,10 +41,10 @@ The main routines that should be modified when subclassing are:
   with other options. Should not be necessary very often.
 * ``_read_single_file``: normally this calls ``_open_dataset`` and then returns
   the data as dictionary that maps from variable names to 3d data arrays (numpy
-  or dask). If it is hard to read the data as xr.Dataset, so that overriding
-  `_open_dataset` is not feasible, this could be overriden instead, but then
-  all the other routines for obtaining grid/metadata/landmask info also have to
-  be overriden.
+  or dask, dimensions should be time, lat, lon). If it is hard to read the data
+  as xr.Dataset, so that overriding `_open_dataset` is not feasible, this could
+  be overriden instead, but then all the other routines for obtaining
+  grid/metadata/landmask info also have to be overriden.
 
 In the following some examples for subclassing are provided.
 
@@ -133,18 +133,6 @@ grid). A reader could look like this::
     class SmapSMReader(DirectoryImageReader):
 
         def __init__(self, directory):
-            self.overpass_dict = {
-                "AM": {
-                    "group": "Soil_Moisture_Retrieval_Data_AM",
-                    "sm": "soil_moisture",
-                    "qc": "retrieval_qual_flag",
-                },
-                "PM": {
-                    "group": "Soil_Moisture_Retrieval_Data_PM",
-                    "sm": "soil_moisture_dca_pm",
-                    "qc": "retrieval_qual_flag_dca_pm",
-                }
-            }
 
             super().__init__(
                 directory,
@@ -157,6 +145,9 @@ grid). A reader could look like this::
             )
 
         def _open_dataset(self, fname):
+            # This function only reads the actual data, but not the coordinates
+            # to avoid having to read and construct the coordinates in every
+            # step.
             sm_arrs = []
             with h5py.File(fname, "r") as f:
                 for op in ["AM", "PM"]:
@@ -164,13 +155,15 @@ grid). A reader could look like this::
                     sm_arrs.append(sm)
             # Now we have read the AM and PM retrievals, but we still need to
             # concatenate them along a new time axis. We don't have to set the
-            # actual time values though, since they will be inferred from the
-            # filename in combination with the timestamps passed in the
-            # constructor.
+            # actual time values, since they will be inferred from the filename
+            # in combination with the timestamps passed in the constructor.
             sm = xr.concat(sm_arrs, dim="time")
             return sm.to_dataset(name="SMAP_L3_SM")
 
         def _read_overpass(self, f, op):
+            # This function reads the data of a single overpass and puts it
+            # into a xarray Dataset, but without specifying coordinate values
+            # (only dimensions are set).
             names = self.overpass_dict[op]
             g = f[names["group"]]
             sm = np.ma.masked_equal(g[names["sm"]][...], -9999)
@@ -180,11 +173,30 @@ grid). A reader could look like this::
             return xr.DataArray(sm, dims=["lat", "lon"])
 
         def _latlon_from_dataset(self, fname):
+            # This method is called from the constructor of base.ReaderBase and
+            # should return latitude and longitude as xr.DataArrays
             with h5py.File(fname, "r") as f:
                 g = f["Soil_Moisture_Retrieval_Data_AM"]
-                lat = self.coord_from_2d(g["latitude"], 0, fill_value=-9999)
-                lon = self.coord_from_2d(g["longitude"], 1, fill_value=-9999)
+                # _1d_coord_from_2d is a function defined in base.ReaderBase
+                # reduces the 2D tensor product coordinates to 1D coordinates
+                lat = self._1d_coord_from_2d(g["latitude"], 0, fill_value=-9999)
+                lon = self._1d_coord_from_2d(g["longitude"], 1, fill_value=-9999)
             return lat, lon
+
+        @property
+        def overpass_dict(self):
+            return {
+                "AM": {
+                    "group": "Soil_Moisture_Retrieval_Data_AM",
+                    "sm": "soil_moisture",
+                    "qc": "retrieval_qual_flag",
+                },
+                "PM": {
+                    "group": "Soil_Moisture_Retrieval_Data_PM",
+                    "sm": "soil_moisture_dca_pm",
+                    "qc": "retrieval_qual_flag_dca_pm",
+                }
+            }
 
 In this example we also adapted ``_latlon_from_dataset``. Instead, we could
 have just read the latitude and longitude in ``_open_dataset`` and added them
@@ -201,7 +213,6 @@ don't contain timestamps, it might be necessary to also override
 detail here, but it works similar to the other examples.
 """
 
-import cftime
 import dask
 import datetime
 import numpy as np
@@ -228,7 +239,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
 
     It can be used to create a single image stack file, a transposed stack (via
     ``write_transposed_dataset``), or a cell-based timeseries dataset (via the
-    repurpose package).
+    ``repurpose`` method).
 
     The advantage over ``xr.open_mfdataset`` is that the reader typically does
     not need to open each dataset to get information on coordinates. Instead,
@@ -325,39 +336,44 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         data size).
     fill_value : float, optional (default: None)
         Fill values to be masked, e.g. -9999 as a common convention.
-    latname : str, optional (default: "lat")
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the latitude data variable, otherwise must be the name of the
-        latitude coordinate.
-    lonname : str, optional (default: "lon")
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the longitude data variable, otherwise must be the name of the
-        longitude coordinate.
-    timename : str, optional (default: "time")
-        The name of the time coordinate.
-    latdim : str, optional (default: None)
-        The name of the latitude dimension in case it's not the same as the
-        latitude coordinate variable. For curvilinear grids it should be the
-        first dimension of the coordinate dimensions.
-    londim : str, optional (default: None)
-        The name of the longitude dimension in case it's not the same as the
-        longitude coordinate variable. For curvilinear grids it should be the
-        first dimension of the coordinate dimensions.
+    latname : str, optional (default: None)
+        Name of the latitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
+    lonname : str, optional (default: None)
+        Name of the longitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
+    timename : str, optional (default: None)
+        The name of the time coordinate. Default is "time".
+    ydim : str, optional (default: None)
+        The name of the latitude/y dimension in case it's not the same as the
+        dimension on the latitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
+    xdim : str, optional (default: None)
+        The name of the longitude/x dimension in case it's not the same as the
+        dimension on the longitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
     locdim : str, optional (default: None)
-        The name of the location dimension for non-rectangular grids. If this
-        is given, you *MUST* provide `lonname` and `latname`.
+        The name of the location dimension for non-rectangular grids.
     lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
-        by giving (start, stop, step) or an array of latitude values
+        by giving (start, stop, step) or an array of latitude values. In this
+        case `lon` also has to be specified.
     lon : tuple or np.ndarray, optional (default: None)
         If the longitude can not be inferred from the dataset you can specify
-        it by giving (start, stop, step) or an array of longitude values.
-    curvilinear : bool, optional (default: False)
-        Whether the grid is curvilinear, i.e. is a 2D grid, but not a regular
-        lat-lon grid. In this case, `latname` and `lonname` must be given, and
-        must be names of the variables containing the 2D latitude and longitude
-        values. Additionally, `latdim` and `londim` must be given and will be
-        interpreted as vertical and horizontal dimension.
+        it by giving (start, stop, step) or an array of longitude values. In
+        this case, `lat` also has to be specified.
+    gridtype : str, optional (default: "infer")
+        Type of the grid, one of "regular", "curvilinear", or "unstructured".
+        By default, gridtype is inferred ("infer"). If `locdim` is passed, it
+        is assumed that the grid is unstructured, and that latitude and
+        longitude are 1D arrays. Otherwise, `gridtype` will be set to
+        "curvilinear" if the coordinate arrays are 2-dimensional, and to
+        "regular" if the coordinate arrays are 1-dimensional.
+        Normally gridtype should be set to "infer". Only if the coordinate
+        arrays are 2-dimensional but correspond to a tensor product of two
+        1-dimensional coordinate arrays, it can be set to "regular" explicitly.
+        In this case the 1-dimensional coordinate arrays are inferred from the
+        2-dimensional arrays.
     landmask : xr.DataArray or str, optional (default: None)
         A land mask to be applied to reduce storage size. This can either be a
         xr.DataArray of the same shape as the dataset images with ``False`` at
@@ -405,19 +421,19 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         skip_missing: bool = False,
         discard_attrs: bool = False,
         fill_value: float = None,
-        latname: str = "lat",
-        lonname: str = "lon",
-        timename: str = "time",
-        latdim: str = None,
-        londim: str = None,
+        latname: str = None,
+        lonname: str = None,
+        timename: str = None,
+        ydim: str = None,
+        xdim: str = None,
         locdim: str = None,
         lat: np.ndarray = None,
         lon: np.ndarray = None,
-        curvilinear: bool = False,
+        gridtype: str = "infer",
+        construct_grid: bool = True,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        construct_grid: bool = True,
         average: str = None,
         timestamps: Sequence[pd.Timedelta] = None,
         use_tqdm: bool = True,
@@ -450,10 +466,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             varnames, timeoffsetvarname, rename, level, skip_missing
         )
         self.timeoffsetvarname = timeoffsetvarname
-        if self.timeoffsetvarname is not None:
-            assert timeoffsetunit is not None
-            self.timeoffsetunit = timeoffsetunit.lower()[0]
-            assert self.timeoffsetunit in ["s", "m", "h", "d"]
+        self.timeoffsetunit = timeoffsetunit
         self.rename = rename
         self.level = level
         self.transpose = transpose
@@ -467,16 +480,16 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             timename=timename,
             latname=latname,
             lonname=lonname,
-            latdim=latdim,
-            londim=londim,
+            ydim=ydim,
+            xdim=xdim,
             locdim=locdim,
             lat=lat,
             lon=lon,
+            gridtype=gridtype,
+            construct_grid=construct_grid,
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
-            curvilinear=curvilinear,
-            construct_grid=construct_grid,
         )
 
         ######################################################################
@@ -485,9 +498,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         # The next step is to create a map that links filepaths to available
         # timestamps
         self._file_tstamp_map = {
-            path: self._tstamps_in_file(
-                path, timestamps=timestamps
-            )
+            path: self._tstamps_in_file(path, timestamps=timestamps)
             for path in filepaths
         }
         # tstamp_file_map maps each timestamp to the file where it can be found
@@ -520,7 +531,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
     def _open_dataset(self, fname: Union[Path, str]) -> xr.Dataset:
         """Returns data from file as xr.Dataset"""
         # can be overriden for custom datasets
-        return xr.open_dataset(fname, **self.open_dataset_kwargs)
+        return xr.load_dataset(fname, **self.open_dataset_kwargs)
 
     def _latlon_from_dataset(
         self, fname: Union[Path, str]
@@ -716,29 +727,8 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             ds = ds.rename(self.rename)
         return ds
 
-    def _convert_timeoffset(self, ds, fname) -> xr.Dataset:
-        if self.timeoffsetvarname is not None:
-            var = self.timeoffsetvarname
-            assert "since" not in self.timeoffsetunit, (
-                "time offset units must be relative to current timestamp"
-            )
-            timestamp = self._tstamps_in_file(fname)[0]
-            start_date = cftime.num2date(0, f"days since {str(timestamp)}")
-            start = cftime.date2num(start_date, "days since 1900-01-01")
-
-            conversion = {
-                "s": 86400, "m": 24*60, "h": 24, "d": 1
-            }[self.timeoffsetunit]
-            # start = pd.to_datetime(timestamp).to_julian_date()
-            time = start + ds[var] / conversion
-            ds[var] = time
-            ds[var].attrs["units"] = "days since 1900-01-01"
-            ds[var].attrs["long_name"] = "Observation time"
-        return ds
-
     def _open_nice_dataset(self, fname) -> xr.Dataset:
         ds = self._make_nicer_ds(self._open_dataset(fname))
-        ds = self._convert_timeoffset(ds, fname)
         return ds
 
     def _fix_varnames_rename_level(
@@ -766,10 +756,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         #
         # (note the missing LAI, since we derive the map from the variables
         # in the file)
-        if isinstance(varnames, str):
-            varnames = [varnames]
-        if timeoffsetvarname is not None and timeoffsetvarname not in varnames:
-            varnames.append(timeoffsetvarname)
+        varnames = self._maybe_add_varnames(varnames, [timeoffsetvarname])
         level = self.normalize_level(level, varnames)
         if skip_missing:
             # Be careful: skip_missing only works if _open_dataset does not do

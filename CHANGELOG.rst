@@ -4,6 +4,10 @@ Changelog
 
 Unreleased
 ==========
+- renaming of keyword ``latdim`` to ``ydim`` and ``londim`` to ``xdim`` in the
+  reading package
+- detection of coordinates based on CF conventions
+- better handling of time offset variables
 
 v0.1.2
 ======

@@ -1,4 +1,4 @@
-import cftime
+from abc import abstractmethod
 import numpy as np
 import os
 import pandas as pd
@@ -11,9 +11,40 @@ from pygeogrids.netcdf import load_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 
 from .base import ReaderBase
+from .utils import numpy_timeoffsetunit
 
 
-class StackTs(ReaderBase):
+class _TimeModificationMixin:
+
+    @abstractmethod
+    def _get_time_unit(self):  # pragma: no cover
+        ...
+
+    def _modify_time(self, df):
+        if self.timevarname is not None and self.timevarname in df:
+            cf_unit = self._get_time_unit()
+            unit, _, start_date = cf_unit.split(" ")
+            np_unit = numpy_timeoffsetunit(unit)
+            start = np.datetime64(start_date)
+            values = df[self.timevarname].values
+            # careful: the conversion to timedelta64 will lose all decimals, so
+            # make sure that the time unit is small enough to represent all
+            # timestamps as integers
+            times = start + values.astype(f"timedelta64[{np_unit}]")
+            index = pd.DatetimeIndex(times)
+            df.index = index
+            df.drop(self.timevarname, axis="columns", inplace=True)
+        if self.timeoffsetvarname is not None and self.timeoffsetvarname in df:
+            times = df.index.values
+            unit = numpy_timeoffsetunit(self.timeoffsetunit)
+            offset = df[self.timeoffsetvarname].values
+            delta = offset.astype(f"timedelta64[{unit}]")
+            df.index = pd.DatetimeIndex(times + delta)
+            df.drop(self.timeoffsetvarname, axis="columns", inplace=True)
+        return df
+
+
+class StackTs(ReaderBase, _TimeModificationMixin):
     """
     Wrapper for xarray.Dataset when timeseries of the data should be read.
 
@@ -32,37 +63,47 @@ class StackTs(ReaderBase):
     Parameters
     ----------
     ds : xr.Dataset, Path or str
-        Xarray dataset (or filename of a netCDF file). Must have a time
-        coordinate and either `latname`/`latdim` and `lonname`/`latdim` (for a
-        regular latitude-longitude grid) or `locdim` as additional
-        coordinates/dimensions.
+        Xarray dataset (or filename of a netCDF file).
     varnames : str
         Names of the variable that should be read.
-    timename : str, optional
-        The name of the time coordinate, default is "time".
-    latname : str, optional
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the latitude data variable, otherwise must be the name of the
-        latitude coordinate. Default is "lat".
-    lonname : str, optional
-        If `locdim` is given (i.e. for non-rectangular grids), this must be the
-        name of the longitude data variable, otherwise must be the name of the
-        longitude coordinate. Default is "lon"
-    latdim : str, optional
-        The name of the latitude dimension in case it's not the same as the
-        latitude coordinate variable.
-    londim : str, optional
-        The name of the longitude dimension in case it's not the same as the
-        longitude coordinate variable.
-    locdim : str, optional
-        The name of the location dimension for non-rectangular grids. If this
-        is given, you *MUST* provide `lonname` and `latname`.
+    latname : str, optional (default: None)
+        Name of the latitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
+    lonname : str, optional (default: None)
+        Name of the longitude coordinate array in the dataset. If it is not
+        given, it is inferred from the dataset using CF-conventions.
+    timename : str, optional (default: None)
+        The name of the time coordinate. Default is "time".
+    ydim : str, optional (default: None)
+        The name of the latitude/y dimension in case it's not the same as the
+        dimension on the latitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
+    xdim : str, optional (default: None)
+        The name of the longitude/x dimension in case it's not the same as the
+        dimension on the longitude array of the dataset. Must be specified if
+        `lat` and `lon` are passed explicitly.
+    locdim : str, optional (default: None)
+        The name of the location dimension for non-rectangular grids.
     lat : tuple or np.ndarray, optional (default: None)
         If the latitude can not be inferred from the dataset you can specify it
-        by giving (start, stop, step) or an array of latitude values
+        by giving (start, stop, step) or an array of latitude values. In this
+        case `lon` also has to be specified.
     lon : tuple or np.ndarray, optional (default: None)
         If the longitude can not be inferred from the dataset you can specify
-        it by giving (start, stop, step) or an array of longitude values.
+        it by giving (start, stop, step) or an array of longitude values. In
+        this case, `lat` also has to be specified.
+    gridtype : str, optional (default: "infer")
+        Type of the grid, one of "regular", "curvilinear", or "unstructured".
+        By default, gridtype is inferred ("infer"). If `locdim` is passed, it
+        is assumed that the grid is unstructured, and that latitude and
+        longitude are 1D arrays. Otherwise, `gridtype` will be set to
+        "curvilinear" if the coordinate arrays are 2-dimensional, and to
+        "regular" if the coordinate arrays are 1-dimensional.
+        Normally gridtype should be set to "infer". Only if the coordinate
+        arrays are 2-dimensional but correspond to a tensor product of two
+        1-dimensional coordinate arrays, it can be set to "regular" explicitly.
+        In this case the 1-dimensional coordinate arrays are inferred from the
+        2-dimensional arrays.
     landmask : xr.DataArray, optional
         A land mask to be applied to reduce storage size.
     bbox : Iterable, optional
@@ -73,27 +114,49 @@ class StackTs(ReaderBase):
         Whether to construct a BasicGrid instance. For very large datasets it
         might be necessary to turn this off, because the grid requires too much
         memory.
+    timevarname : str, optional (default: None)
+        Name of the time variable (absolute time) to use instead of the
+        original timestamps.
+    timeoffsetvarname : str, optional (default: None)
+        Sometimes an image is not really an image (i.e. a snapshot at a fixed
+        time), but is composed of multiple observations at different times
+        (e.g. satellite overpasses). In these cases, image files often contain
+        a time offset variable, that gives the exact observation time.
+        Time offset is calculated after applying `rename`, so
+        `timeoffsetvarname` should be the renamed variable name.
+    timeoffsetunit : str, optional (default: None)
+        The unit of the time offset. Required if `timeoffsetvarname` is not
+        ``None``. Valid values are "seconds", "minutes", "hours", "days".
+    **open_dataset_kwargs : keyword arguments
+       Additional keyword arguments passed to ``xr.open_dataset`` in case `ds`
+       is a filename.
     """
 
     def __init__(
         self,
-        ds: xr.Dataset,
-        varnames: Union[str, Sequence],
-        timename: str = "time",
-        latname: str = "lat",
-        lonname: str = "lon",
-        latdim: str = None,
-        londim: str = None,
+        ds: Union[xr.Dataset, str, Path],
+        varnames: Union[str, Sequence] = None,
+        latname: str = None,
+        lonname: str = None,
+        timename: str = None,
+        ydim: str = None,
+        xdim: str = None,
         locdim: str = None,
-        lat: Union[np.ndarray, tuple] = None,
-        lon: Union[np.ndarray, tuple] = None,
+        lat: np.ndarray = None,
+        lon: np.ndarray = None,
+        gridtype: str = "infer",
+        construct_grid: bool = True,
         landmask: xr.DataArray = None,
         bbox: Iterable = None,
         cellsize: float = None,
-        construct_grid: bool = True,
+        timevarname=None,
+        timeoffsetvarname=None,
+        timeoffsetunit=None,
+        **open_dataset_kwargs,
     ):
         if isinstance(ds, (str, Path)):
-            ds = xr.open_dataset(ds)
+            ds = xr.open_dataset(ds, **open_dataset_kwargs)
+        varnames = self._maybe_add_varnames(varnames, [timevarname, timeoffsetvarname])
 
         super().__init__(
             ds,
@@ -101,26 +164,29 @@ class StackTs(ReaderBase):
             timename=timename,
             latname=latname,
             lonname=lonname,
-            latdim=latdim,
-            londim=londim,
+            ydim=ydim,
+            xdim=xdim,
             locdim=locdim,
             lat=lat,
             lon=lon,
+            gridtype=gridtype,
+            construct_grid=construct_grid,
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
-            construct_grid=construct_grid,
         )
 
         if self.gridtype == "unstructured":
             self.data = ds[self.varnames]
         else:
             # we have to reshape the data
-            latdim = self.latdim if self.latdim is not None else self.latname
-            londim = self.londim if self.londim is not None else self.lonname
             self.orig_data = ds[self.varnames]
-            self.data = self.orig_data.stack({"loc": (latdim, londim)})
+            self.data = self.orig_data.stack({"loc": (self.ydim, self.xdim)})
             self.locdim = "loc"
+
+        self.timevarname = timevarname
+        self.timeoffsetvarname = timeoffsetvarname
+        self.timeoffsetunit = timeoffsetunit
 
     def read(self, *args, **kwargs) -> pd.Series:
         """
@@ -139,7 +205,7 @@ class StackTs(ReaderBase):
         """
         if len(args) == 1:
             gpi = args[0]
-            if self.gridtype != "unstructured":
+            if self.gridtype == "regular":
                 lon, lat = self.grid.gpi2lonlat(gpi)
 
         elif len(args) == 2:
@@ -148,28 +214,31 @@ class StackTs(ReaderBase):
             if self.gridtype == "unstructured":
                 gpi = self.grid.find_nearest_gpi(lon, lat)[0]
                 if not isinstance(gpi, np.integer):  # pragma: no cover
-                    raise ValueError(
-                        f"No gpi near (lon={lon}, lat={lat}) found"
-                    )
+                    raise ValueError(f"No gpi near (lon={lon}, lat={lat}) found")
         else:  # pragma: no cover
             raise ValueError(
                 f"args must have length 1 or 2, but has length {len(args)}"
             )
 
-        if self.gridtype == "unstructured":
-            data = self.data[{self.locdim: gpi}]
-        else:
+        if self.gridtype == "regular":
             data = self.orig_data.sel(lat=lat, lon=lon)
+        else:
+            data = self.data[{self.locdim: gpi}]
         df = data.to_pandas()[self.varnames]
-        return df
+        return self._modify_time(df)
+
+    def _get_time_unit(self):
+        return self.data[self.timevarname].attrs["units"]
 
 
-class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
+class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
     def __init__(
         self,
         ts_path,
         grid_path=None,
         timevarname=None,
+        timeoffsetvarname="time_offset",
+        timeoffsetunit="seconds",
         read_bulk=None,
         kd_tree_name="pykdtree",
         **kwargs,
@@ -186,11 +255,18 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
             series to read. If None is passed, grid.nc is searched for in the
             ts_path.
         read_bulk : boolean, optional (default: None)
-            If set to True (default) the data of all locations is read into memory,
-            and subsequent calls to read_ts read from the cache and not from
-            disk this makes reading complete files faster.
+            If set to True (default) the data of all locations is read into
+            memory, and subsequent calls to read_ts read from the cache and not
+            from disk this makes reading complete files faster.
         timevarname : str, optional (default: None)
-            Name of the time variable to use instead of the original timestamps.
+            Name of the time variable (absolute time) to use instead of the
+            original timestamps.
+        timeoffsetvarname : str, optional (default: None)
+            Name of the time offset variable name (relative to original
+            timestamps).
+        timeoffsetunit : str, optional (default: None)
+            The unit of the time offset. Required if `timeoffsetvarname` is not
+            ``None``. Valid values are "seconds"/, "minutes", "hours", "days".
         kd_tree_name : str, optional (default: "pykdtree")
             Name of the Kd-tree engine used in the grid. Available options are
             "pykdtree" and "scipy".
@@ -200,7 +276,7 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         parameters : list, optional (default: None)
             Specific variable names to read, if None are selected, all are
             read.
-        offsets : dict, optional (default:None)
+        offsets : dict, optional (default: None)
             Offsets (values) that are added to the parameters (keys)
         scale_factors : dict, optional (default:None)
             Offset (value) that the parameters (key) is multiplied with
@@ -208,7 +284,7 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
 
         Optional keyword arguments to pass to OrthoMultiTs class:
         ---------------------------------------------------------
-        read_dates : boolean, optional (default:False)
+        read_dates : boolean, optional (default: False)
             if false dates will not be read automatically but only on specific
             request useable for bulk reading because currently the netCDF
             num2date routine is very slow for big datasets
@@ -221,7 +297,8 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         if "ioclass_kws" in kwargs:
             del kwargs["ioclass_kws"]
         # if read_bulk is not given, we use the value from ioclass_kws, or True
-        # if this is also given. Otherwise we overwrite the value in ioclass_kws
+        # if this is also given. Otherwise we overwrite the value in
+        # ioclass_kws
         if read_bulk is None:
             read_bulk = ioclass_kws.get("read_bulk", True)
         else:
@@ -233,16 +310,13 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
         ioclass_kws["read_bulk"] = read_bulk
         super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
         self.timevarname = timevarname
-
+        self.timeoffsetvarname = timeoffsetvarname
+        self.timeoffsetunit = timeoffsetunit
 
     def read(self, *args, **kwargs) -> pd.DataFrame:
         df = super().read(*args, **kwargs)
-        if self.timevarname is not None:
-            unit = self.fid.dataset.variables[self.timevarname].units
-            times = df[self.timevarname].values
-            index = pd.DatetimeIndex(
-                cftime.num2pydate(times, unit)
-            )
-            df.index = index
-            df.drop(self.timevarname, axis="columns", inplace=True)
+        df = self._modify_time(df)
         return df
+
+    def _get_time_unit(self):
+        return self.fid.dataset.variables[self.timevarname].units

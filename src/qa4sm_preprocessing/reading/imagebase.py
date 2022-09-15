@@ -1,17 +1,18 @@
 from abc import abstractmethod
 import dask
+import dask.array as da
 import datetime
 import numpy as np
 from pathlib import Path
 import shutil
-from typing import Union, Iterable, List, Tuple, Sequence, Dict
+from typing import Union, List, Tuple, Dict
 import xarray as xr
 
 from pygeobase.object_base import Image
 from repurpose.img2ts import Img2Ts
 
 from .exceptions import ReaderError
-from .utils import mkdate, nimages_for_memory
+from .utils import mkdate, nimages_for_memory, numpy_timeoffsetunit
 from .base import ReaderBase
 from .timeseries import GriddedNcOrthoMultiTs
 
@@ -81,9 +82,7 @@ class ImageReaderBase(ReaderBase):
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
-    ) -> Dict[
-        str, Union[np.ndarray, dask.array.core.Array]
-    ]:  # pragma: no cover
+    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:  # pragma: no cover
         """
         Reads multiple images of a dataset as a numpy/dask array.
 
@@ -130,6 +129,28 @@ class ImageReaderBase(ReaderBase):
         start, end = self._validate_start_end(start, end)
         times = self.tstamps_for_daterange(start, end)
         block_dict = self._read_block(start, end)
+        array_attrs = self.array_attrs.copy()
+
+        # if there is a time offset variable we will convert it to absolute
+        # times relative to 1970
+        if self.timeoffsetvarname is not None:
+            vname = self.timeoffsetvarname
+            values = block_dict[vname]
+            exact_time = np.empty_like(values, dtype=float)
+            for i, t in enumerate(times):
+                offset = values[i, ...]
+                np_unit = numpy_timeoffsetunit(self.timeoffsetunit)
+                delta = offset.astype(f"timedelta64[{np_unit}]")
+                # seconds hard-coded here, might be relaxed in the future
+                start = np.datetime64(t, "s")
+                exact_time[i, ...] = (start + delta).astype(float)
+            block_dict[vname] = exact_time
+            array_attrs[vname].update(
+                {
+                    "units": "seconds since 1970-01-01",
+                    "description": "Exact acquisition time",
+                }
+            )
 
         # we might need to apply the landmask
         if self.landmask is not None and _apply_landmask_bbox:
@@ -155,19 +176,26 @@ class ImageReaderBase(ReaderBase):
             coords[self.lonname] = self.lon
             dims = (self.timename, self.latname, self.lonname)
         elif self.gridtype == "curvilinear":
-            coords[self.latname] = ([self.latdim, self.londim], self.lat)
-            coords[self.lonname] = ([self.latdim, self.londim], self.lon)
-            dims = (self.timename, self.latdim, self.londim)
+            coords[self.latname] = ([self.ydim, self.xdim], self.lat)
+            coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
+            dims = (self.timename, self.ydim, self.xdim)
         else:  # unstructured grid
             coords[self.latname] = (self.locdim, self.lat.data)
             coords[self.lonname] = (self.locdim, self.lon.data)
             dims = (self.timename, self.locdim)
-
         arrays = {
-            name: (dims, data, self.array_attrs[name])
-            for name, data in block_dict.items()
+            name: (dims, data, array_attrs[name]) for name, data in block_dict.items()
         }
         block = xr.Dataset(arrays, coords=coords, attrs=self.global_attrs)
+
+        # add some nice CF convention attributes to the coordinates
+        block[self.latname].attrs.update(
+            {"units": "degrees_north", "standard_name": "latitude"}
+        )
+        block[self.lonname].attrs.update(
+            {"units": "degrees_east", "standard_name": "longitude"}
+        )
+        block[self.timename].attrs.update({"standard_name": "time"})
 
         # bounding box is applied after assigning the coordinates
         if self.bbox is not None and _apply_landmask_bbox:
@@ -185,9 +213,7 @@ class ImageReaderBase(ReaderBase):
             )
         return block
 
-    def read(
-        self, timestamp: Union[datetime.datetime, str], **kwargs
-    ) -> Image:
+    def read(self, timestamp: Union[datetime.datetime, str], **kwargs) -> Image:
         """
         Read a single image at a given timestamp. Raises `ReaderError` if
         timestamp is not available in the dataset.
@@ -211,21 +237,23 @@ class ImageReaderBase(ReaderBase):
             timestamp = mkdate(timestamp)
 
         if timestamp not in self.timestamps:  # pragma: no cover
-            raise ReaderError(
-                f"Timestamp {timestamp} is not available in the dataset!"
-            )
+            raise ReaderError(f"Timestamp {timestamp} is not available in the dataset!")
 
-        img = self.read_block(
-            timestamp, timestamp, _apply_landmask_bbox=False
-        ).isel({self.timename: 0})
+        img = self.read_block(timestamp, timestamp, _apply_landmask_bbox=False).isel(
+            {self.timename: 0}
+        )
         img = self._stack(img)
         data = {
             varname: img[varname].values[self.grid.activegpis]
             for varname in self.varnames
         }
-        metadata = self.array_attrs
+        metadata = {varname: img[varname].attrs.copy() for varname in self.varnames}
         img = Image(
-            self.grid.arrlon, self.grid.arrlat, data, metadata, timestamp,
+            self.grid.arrlon,
+            self.grid.arrlat,
+            data,
+            metadata,
+            timestamp,
         )
         return img
 
@@ -239,13 +267,13 @@ class ImageReaderBase(ReaderBase):
         return img
 
     def repurpose(
-            self,
-            outpath: Union[Path, str],
-            start: Union[datetime.datetime, str] = None,
-            end: Union[datetime.datetime, str] = None,
-            overwrite: bool = False,
-            memory: float = 2,
-            timevarname: str = None,
+        self,
+        outpath: Union[Path, str],
+        start: Union[datetime.datetime, str] = None,
+        end: Union[datetime.datetime, str] = None,
+        overwrite: bool = False,
+        memory: float = 2,
+        **reader_kwargs,
     ):
         """
         Transforms the netCDF stack to the pynetcf timeseries format.
@@ -261,6 +289,7 @@ class ImageReaderBase(ReaderBase):
         overwrite: bool, optional (default: False)
             Whether to overwrite existing directories. If set to False, the
             function will return a reader for the existing directory.
+        **reader_kwargs: additional keyword arguments for GriddedNcOrthoMultiTs
 
         Returns
         -------
@@ -274,8 +303,9 @@ class ImageReaderBase(ReaderBase):
         if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
+            array_attrs = {v: testimg[v].attrs.copy() for v in self.varnames}
             n = nimages_for_memory(testimg, memory)
-            if hasattr(self, "use_tqdm"): # pragma: no branch
+            if hasattr(self, "use_tqdm"):  # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
             reshuffler = Img2Ts(
@@ -285,7 +315,7 @@ class ImageReaderBase(ReaderBase):
                 end,
                 cellsize_lat=self.cellsize,
                 cellsize_lon=self.cellsize,
-                ts_attributes=self.array_attrs,
+                ts_attributes=array_attrs,
                 global_attr=self.global_attrs,
                 zlib=True,
                 imgbuffer=n,
@@ -293,5 +323,5 @@ class ImageReaderBase(ReaderBase):
             reshuffler.calc()
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 self.use_tqdm = orig_tqdm
-        reader = GriddedNcOrthoMultiTs(str(outpath), timevarname=timevarname, read_bulk=True)
+        reader = GriddedNcOrthoMultiTs(str(outpath), **reader_kwargs)
         return reader

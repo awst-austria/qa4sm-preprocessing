@@ -29,8 +29,6 @@ import argparse
 from pathlib import Path
 import sys
 
-from repurpose.img2ts import Img2Ts
-
 from . import StackImageReader, DirectoryImageReader
 from .transpose import write_transposed_dataset
 from .utils import mkdate, str2bool
@@ -109,9 +107,9 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help="Name of the latitude coordinate. Default is 'lat'",
         )
         self.add_argument(
-            "--latdim",
+            "--ydim",
             type=str,
-            help="Name of the latitude dimension (e.g. north_south)",
+            help="Name of the latitude/y dimension (e.g. north_south)",
         )
         self.add_argument(
             "--lonname",
@@ -120,9 +118,9 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             help="Name of the longitude coordinate. Default is 'lon'",
         )
         self.add_argument(
-            "--londim",
+            "--xdim",
             type=str,
-            help="Name of the longitude dimension (e.g. east_west).",
+            help="Name of the longitude/x dimension (e.g. east_west).",
         )
         self.add_argument(
             "--locdim",
@@ -137,8 +135,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             default=None,
             help=(
                 "Start and stepsize for latitude vector, in case it can"
-                " not be inferred from the netCDF. Requires that --latdim"
-                " is also given."
+                " not be inferred from the netCDF."
             ),
         )
         self.add_argument(
@@ -149,8 +146,7 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             default=None,
             help=(
                 "Start and stepsize for longitude vector, in case it can"
-                " not be inferred from the netCDF. Requires that --londim"
-                " is also given."
+                " not be inferred from the netCDF."
             ),
         )
         self.add_argument(
@@ -272,8 +268,8 @@ def parse_args(parser, args):
     common_reader_kwargs = dict(
         latname=args.latname,
         lonname=args.lonname,
-        latdim=args.latdim,
-        londim=args.londim,
+        ydim=args.ydim,
+        xdim=args.xdim,
         locdim=args.locdim,
         lat=args.lat,
         lon=args.lon,
@@ -312,10 +308,7 @@ def repurpose(args):
     outpath.mkdir(exist_ok=True, parents=True)
 
     reader.repurpose(
-        args.output_root,
-        start=args.start,
-        end=args.end,
-        memory=args.memory
+        args.output_root, start=args.start, end=args.end, memory=args.memory
     )
 
 

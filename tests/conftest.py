@@ -29,7 +29,7 @@ def test_output_path(tmpdir_factory):
 
 def make_regular_test_dataset():
     rng = np.random.default_rng(42)
-    nlat, nlon, ntime = 5, 10, 20
+    nlat, nlon, ntime = 2, 4, 8
     lat = np.linspace(0, 1, nlat)
     lon = np.linspace(0, 1, nlon)
     time = pd.date_range("2000", periods=ntime, freq="D")
@@ -56,7 +56,7 @@ def regular_test_dataset():
 
 def make_curvilinear_test_dataset():
     rng = np.random.default_rng(42)
-    nlat, nlon, ntime = 5, 10, 20
+    nlat, nlon, ntime = 2, 4, 8
     lat = np.linspace(0, 1, nlat)
     lon = np.linspace(0, 1, nlon)
     LON, LAT = np.meshgrid(lon, lat)
@@ -66,7 +66,7 @@ def make_curvilinear_test_dataset():
     Y = rng.normal(size=(ntime, nlat, nlon))
 
     ds = xr.Dataset(
-        {"X": (["time", "y", "x"], X), "Y": (["time", "y", "x"], X)},
+        {"X": (["time", "y", "x"], X), "Y": (["time", "y", "x"], Y)},
         coords={
             "time": time,
             "lat": (["y", "x"], LAT),
@@ -78,7 +78,7 @@ def make_curvilinear_test_dataset():
 
 @pytest.fixture
 def curvilinear_test_dataset():
-    return make_curvilinear_test_dataset
+    return make_curvilinear_test_dataset()
 
 
 def make_unstructured_test_dataset():
@@ -113,7 +113,7 @@ def synthetic_test_args(request):
         kwargs = {}
     elif request.param == "curvilinear":
         ds = make_curvilinear_test_dataset()
-        kwargs = {"curvilinear": True, "latdim": "y", "londim": "x"}
+        kwargs = {}
     elif request.param == "unstructured":
         ds = make_unstructured_test_dataset()
         kwargs = {"locdim": "location"}
@@ -131,8 +131,8 @@ def lis_noahmp_directory_image_reader():
         "SoilMoist_inst",
         fmt=fmt,
         pattern=pattern,
-        latdim="north_south",
-        londim="east_west",
+        ydim="north_south",
+        xdim="east_west",
         level={"SoilMoist_profiles": 0},
         lat=(29.875, 54.75, 0.25),
         lon=(-11.375, 1.0, 0.25),

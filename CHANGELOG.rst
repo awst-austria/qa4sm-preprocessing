@@ -2,7 +2,7 @@
 Changelog
 =========
 
-Unreleased
+v0.1.3
 ==========
 - renaming of keyword ``latdim`` to ``ydim`` and ``londim`` to ``xdim`` in the
   reading package

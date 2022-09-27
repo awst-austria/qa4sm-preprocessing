@@ -24,6 +24,46 @@ from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 from qa4sm_preprocessing.nc_image_reader.exceptions import ReaderError
 from qa4sm_preprocessing.nc_image_reader.utils import mkdate, infer_chunks
 
+ISEA_GRID_FILE = path_config = "/home/pstradio/Projects_data/QA4SM/SMOS/5deg_SMOSL2_grid.nc"
+
+
+class ISEA4h9CellGrid:
+    """ CellGrid version of ISEA 4h9 Grid as used in SMOS L2 """
+
+    def __init__(self, isea_grid_file=ISEA_GRID_FILE, bbox=None):
+
+        if isea_grid_file is None:
+            # use formula of grid definition
+            raise NotImplementedError(
+                "Here a formula for the ISEA 4h9 grid could be passed, to avoid"
+                " relaying on the grid file."
+            )
+
+        else:
+            self.isea_cellgrid = load_grid(isea_grid_file)
+
+        self.bbox = bbox
+        if self.bbox:
+            sgpis = self.get_bbox_grid_points(
+                latmin=self.bbox[1], latmax=self.bbox[3],
+                lonmin=self.bbox[0], lonmax=self.bbox[2])
+
+            self.isea_cellgrid = self.subgrid_from_gpis(sgpis)
+
+        self.subset_shape = (
+            len(np.unique(self.activearrlat)),
+            len(np.unique(self.activearrlon))
+        )
+
+    def __getattr__(self, attr):
+        # inherit the attributes of the cellgrid directly, so they can be
+        # called from the main instance
+        return getattr(self.isea_cellgrid, attr)
+
+    def cut(self) -> CellGrid:
+        # create a new grid from the active subset
+        return self.isea_cellgrid
+
 
 class XarrayReaderBase:
     """
@@ -39,30 +79,30 @@ class XarrayReaderBase:
     """
 
     def __init__(
-        self,
-        ds: Union[xr.Dataset, str],
-        varnames: Union[str, Sequence],
-        level: dict = None,
-        timename: str = "time",
-        latname: str = None,
-        lonname: str = None,
-        latdim: str = None,
-        londim: str = None,
-        locdim: str = None,
-        lat: tuple = None,
-        lon: tuple = None,
-        landmask: Union[xr.DataArray, str] = None,
-        bbox: Iterable = None,
-        cellsize: float = None,
-        curvilinear: bool = False,
+            self,
+            ds: Union[xr.Dataset, str],
+            varnames: Union[str, Sequence],
+            level: dict = None,
+            timename: str = "time",
+            latname: str = None,
+            lonname: str = None,
+            latdim: str = None,
+            londim: str = None,
+            locdim: str = None,
+            lat: tuple = None,
+            lon: tuple = None,
+            landmask: Union[xr.DataArray, str] = None,
+            bbox: Iterable = None,
+            cellsize: float = None,
+            curvilinear: bool = False,
     ):
         if isinstance(varnames, str):
             varnames = [varnames]
         self.varnames = list(varnames)
         if (
-            level is not None
-            and len(self.varnames) == 1
-            and not isinstance(list(level.values())[0], dict)
+                level is not None
+                and len(self.varnames) == 1
+                and not isinstance(list(level.values())[0], dict)
         ):
             self.level = {self.varnames[0]: level}
         else:
@@ -81,17 +121,17 @@ class XarrayReaderBase:
         self.locdim = locdim
         self.curvilinear = curvilinear
         if self.curvilinear and (
-            latdim is None
-            or londim is None
-            or latname is None
-            or lonname is None
-            or locdim is not None
+                latdim is None
+                or londim is None
+                or latname is None
+                or lonname is None
+                or locdim is not None
         ):
             raise ReaderError(
                 "For curvilinear grids, lat/lon-dim and lat/lon-name must be given."
             )
         if locdim is not None and (
-            latname is None or lonname is None
+                latname is None or lonname is None
         ):  # pragma: no cover
             raise ReaderError(
                 "If locdim is given, latname and lonname must also be given."
@@ -112,7 +152,9 @@ class XarrayReaderBase:
         else:
             self.landmask = landmask
 
-        self.grid = self._grid_from_xarray(ds)
+        self.grid = ISEA4h9CellGrid()  # self._grid_from_xarray(ds)
+        self.lat = self._get_coord(ds, "lat")
+        self.lon = self._get_coord(ds, "lon")
         (
             self.global_attrs,
             self.array_attrs,
@@ -240,9 +282,9 @@ class XarrayImageReaderMixin:
     """
 
     def _validate_start_end(
-        self,
-        start: Union[datetime.datetime, str],
-        end: Union[datetime.datetime, str],
+            self,
+            start: Union[datetime.datetime, str],
+            end: Union[datetime.datetime, str],
     ) -> Tuple[datetime.datetime]:
         if start is None:
             start = self.timestamps[0]
@@ -255,9 +297,9 @@ class XarrayImageReaderMixin:
         return start, end
 
     def tstamps_for_daterange(
-        self,
-        start: Union[datetime.datetime, str],
-        end: Union[datetime.datetime, str],
+            self,
+            start: Union[datetime.datetime, str],
+            end: Union[datetime.datetime, str],
     ) -> List[datetime.datetime]:
         """
         Timestamps available within the given date range.
@@ -287,7 +329,7 @@ class XarrayImageReaderMixin:
 
     @abstractmethod
     def _read_block(
-        self, start: datetime.datetime, end: datetime.datetime
+            self, start: datetime.datetime, end: datetime.datetime
     ) -> xr.Dataset:  # pragma: no cover
         """
         Returns a single image for the given timestamp
@@ -295,10 +337,10 @@ class XarrayImageReaderMixin:
         ...
 
     def read_block(
-        self,
-        start: Union[datetime.datetime, str] = None,
-        end: Union[datetime.datetime, str] = None,
-        _apply_landmask_bbox=True,
+            self,
+            start: Union[datetime.datetime, str] = None,
+            end: Union[datetime.datetime, str] = None,
+            _apply_landmask_bbox=True,
     ) -> xr.Dataset:
         """
         Reads a block of the image stack.
@@ -359,6 +401,7 @@ class XarrayImageReaderMixin:
                 block = block.rename(
                     {self.londim: self.lonname}
                 ).assign_coords({self.lonname: self.lon.values})
+
         if self.locdim is not None:
             # add latitude and longitude as coordinates
             # if locdim is not None, latname and lonname have to be set
@@ -371,19 +414,19 @@ class XarrayImageReaderMixin:
             lonmin, latmin, lonmax, latmax = (*self.bbox,)
             block = block.where(
                 (
-                    (latmin <= block[self.latname])
-                    & (block[self.latname] <= latmax)
-                    & (
-                        (lonmin <= block[self.lonname])
-                        & (block[self.lonname] <= lonmax)
-                    )
+                        (latmin <= block[self.latname])
+                        & (block[self.latname] <= latmax)
+                        & (
+                                (lonmin <= block[self.lonname])
+                                & (block[self.lonname] <= lonmax)
+                        )
                 ),
                 drop=True,
             )
         return block
 
     def read(
-        self, timestamp: Union[datetime.datetime, str], **kwargs
+            self, timestamp: Union[datetime.datetime, str], **kwargs
     ) -> Image:
         """
         Read a single image at a given timestamp. Raises `ReaderError` if
@@ -419,8 +462,9 @@ class XarrayImageReaderMixin:
             latname = self.latname if not self.curvilinear else self.latdim
             lonname = self.lonname if not self.curvilinear else self.londim
             img = img.stack(dimensions={"loc": (latname, lonname)})
+
         data = {
-            varname: img[varname].values[self.grid.activegpis]
+            varname: img[varname].values#[self.grid.activegpis]
             for varname in self.varnames
         }
         metadata = self.array_attrs
@@ -470,7 +514,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         A regex pattern to extract the part of the filename that contains the
         time information. It must contain a statement in parentheses that is
         extracted with ``re.findall``.
-        If you are using this, make sure that `fmt` matches the the part of the
+        If you are using this, make sure that `fmt` matches the part of the
         pattern that is kept.
         Example: Consider that your filenames follow the strptime/glob pattern
         ``MY_DATASET_.%Y%m%d.%H%M.*.nc``, for example, one filename could be
@@ -542,30 +586,30 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
     """
 
     def __init__(
-        self,
-        directory: Union[Path, str],
-        varnames: Union[str, Sequence],
-        level: dict = None,
-        fmt: str = None,
-        pattern: str = "*.nc",
-        time_regex_pattern: str = None,
-        timename: str = "time",
-        latname: str = None,
-        lonname: str = None,
-        latdim: str = None,
-        londim: str = None,
-        locdim: str = None,
-        lat: tuple = None,
-        lon: tuple = None,
-        daily_average: bool = False,
-        landmask: xr.DataArray = None,
-        bbox: Iterable = None,
-        cellsize: float = None,
-        rename: dict = None,
-        use_dask: bool = False,
-        cache: bool = False,
-        curvilinear: bool = False,
-        discard_attrs: bool = False,
+            self,
+            directory: Union[Path, str],
+            varnames: Union[str, Sequence],
+            level: dict = None,
+            fmt: str = None,
+            pattern: str = "*.nc",
+            time_regex_pattern: str = None,
+            timename: str = "time",
+            latname: str = None,
+            lonname: str = None,
+            latdim: str = None,
+            londim: str = None,
+            locdim: str = None,
+            lat: tuple = None,
+            lon: tuple = None,
+            daily_average: bool = False,
+            landmask: xr.DataArray = None,
+            bbox: Iterable = None,
+            cellsize: float = None,
+            rename: dict = None,
+            use_dask: bool = False,
+            cache: bool = False,
+            curvilinear: bool = False,
+            discard_attrs: bool = False,
     ):
 
         # first, we walk over the whole directory subtree and find any files
@@ -573,7 +617,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         directory = Path(directory)
         filepaths = {}
         for fpath in sorted(
-            glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True)
+                glob.glob(str(Path(directory) / f"**/{pattern}"), recursive=True)
         ):
             fname = Path(fpath).name
             filepaths[fname] = fpath
@@ -695,8 +739,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         if self.daily_average:
             sub_dss = []
             if (
-                timestamp not in self.nested_timestamps.keys()
-                and timestamp in self.filepaths.keys()
+                    timestamp not in self.nested_timestamps.keys()
+                    and timestamp in self.filepaths.keys()
             ):
                 raise ReaderError(
                     "Reading individual sub-daily timestamps is not supported"
@@ -704,8 +748,8 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
                     " 00:00:00 to access the daily averaged value."
                 )
             elif (
-                timestamp not in self.nested_timestamps.keys()
-                and timestamp not in self.filepaths.keys()
+                    timestamp not in self.nested_timestamps.keys()
+                    and timestamp not in self.filepaths.keys()
             ):
                 raise ReaderError(
                     f"The provided timestamp {timestamp} is not available in"
@@ -735,10 +779,36 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             )
         if self.rename is not None:
             ds = ds.rename(self.rename)
-        return self._select_vars_levels(ds)
+
+        gpis, _, idx = np.intersect1d(ds.Grid_Point_ID.values,
+                                      self.grid.get_grid_points()[0],
+                                      return_indices=True)
+
+        ds_selected = self._select_vars_levels(ds)
+
+        var_template = np.empty(self.grid.get_grid_points()[0].shape)
+        var_template[:] = np.nan
+        dim_copy = var_template.copy()
+
+        dim_copy[idx] = gpis
+
+        vars = {}
+        for name, values in ds_selected.items():
+            if name == "Grid_Point_ID":
+                continue
+
+            var_copy = var_template.copy()
+            var_copy[idx] = values
+            vars[name] = ("Grid_Point_ID", var_copy)
+
+        ds_selected = xr.Dataset(
+            data_vars=vars,
+            coords={'Grid_Point_ID': dim_copy}, )
+
+        return ds_selected
 
     def _read_block(
-        self, start: datetime.datetime, end: datetime.datetime
+            self, start: datetime.datetime, end: datetime.datetime
     ) -> xr.Dataset:
         # Here we just read image file by image file within the given range and
         # concatenate them to a single dataset along the time dimension.
@@ -845,23 +915,23 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
     """
 
     def __init__(
-        self,
-        ds: xr.Dataset,
-        varnames: str,
-        level: dict = None,
-        timename: str = "time",
-        latname: str = None,
-        lonname: str = None,
-        latdim: str = None,
-        londim: str = None,
-        locdim: str = None,
-        lat: tuple = None,
-        lon: tuple = None,
-        landmask: xr.DataArray = None,
-        bbox: Iterable = None,
-        cellsize: float = None,
-        use_dask: bool = False,
-        curvilinear: bool = False,
+            self,
+            ds: xr.Dataset,
+            varnames: str,
+            level: dict = None,
+            timename: str = "time",
+            latname: str = None,
+            lonname: str = None,
+            latdim: str = None,
+            londim: str = None,
+            locdim: str = None,
+            lat: tuple = None,
+            lon: tuple = None,
+            landmask: xr.DataArray = None,
+            bbox: Iterable = None,
+            cellsize: float = None,
+            use_dask: bool = False,
+            curvilinear: bool = False,
     ):
 
         if isinstance(ds, (str, Path)):
@@ -891,19 +961,19 @@ class XarrayImageStackReader(XarrayReaderBase, XarrayImageReaderMixin):
         self._timestamps = ds.indexes[self.timename].to_pydatetime()
 
     def _read_block(
-        self, start: datetime.datetime, end: datetime.datetime
+            self, start: datetime.datetime, end: datetime.datetime
     ) -> xr.DataArray:
         return self.data.sel({self.timename: slice(start, end)})
 
 
 class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs):
     def __init__(
-        self,
-        ts_path,
-        grid_path=None,
-        time_offset_name=None,
-        time_offset_unit="S",
-        **kwargs,
+            self,
+            ts_path,
+            grid_path=None,
+            time_offset_name=None,
+            time_offset_unit="S",
+            **kwargs,
     ):
         """
         Class for reading time series in pynetcf format after reshuffling.
@@ -1035,21 +1105,21 @@ class XarrayTSReader(XarrayReaderBase):
     """
 
     def __init__(
-        self,
-        ds: xr.Dataset,
-        varnames: Union[str, Sequence],
-        level: dict = None,
-        timename: str = "time",
-        latname: str = "lat",
-        lonname: str = "lon",
-        latdim: str = None,
-        londim: str = None,
-        locdim: str = None,
-        lat: tuple = None,
-        lon: tuple = None,
-        landmask: xr.DataArray = None,
-        bbox: Iterable = None,
-        cellsize: float = None,
+            self,
+            ds: xr.Dataset,
+            varnames: Union[str, Sequence],
+            level: dict = None,
+            timename: str = "time",
+            latname: str = "lat",
+            lonname: str = "lon",
+            latdim: str = None,
+            londim: str = None,
+            locdim: str = None,
+            lat: tuple = None,
+            lon: tuple = None,
+            landmask: xr.DataArray = None,
+            bbox: Iterable = None,
+            cellsize: float = None,
     ):
         if isinstance(varnames, str):
             varnames = [varnames]

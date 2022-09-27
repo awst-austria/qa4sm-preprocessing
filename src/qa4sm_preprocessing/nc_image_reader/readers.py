@@ -661,6 +661,7 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
         # return them sorted
         self._timestamps = sorted(list(self.filepaths))
 
+        self.discard_attrs = discard_attrs
         if discard_attrs:
             self.global_attrs = None
             self.array_attrs = None
@@ -756,8 +757,10 @@ class DirectoryImageReader(XarrayReaderBase, XarrayImageReaderMixin):
             compat="override",
         ).assign_coords({self.timename: timestamps})
 
-        for varname in self.array_attrs:
-            block[varname].attrs.update(self.array_attrs[varname])
+        if not self.discard_attrs:
+            for varname in self.array_attrs:
+                block[varname].attrs.update(self.array_attrs[varname])
+
         return block
 
 

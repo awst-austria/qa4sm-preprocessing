@@ -27,12 +27,15 @@ def test_cf_conventions(synthetic_test_args):
     if reader.gridtype == "regular":
         assert reader.ydim == "mylat"
         assert reader.xdim == "mylon"
+        assert reader.locdim == None
     elif reader.gridtype == "curvilinear":
         assert reader.ydim == "y"
         assert reader.xdim == "x"
+        assert reader.locdim == None
     else:
-        assert reader.ydim == "location"
-        assert reader.xdim == "location"
+        assert reader.ydim == None
+        assert reader.xdim == None
+        assert reader.locdim == "location"
     validate_reader(reader, ds)
 
 

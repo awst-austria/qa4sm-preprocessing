@@ -73,7 +73,6 @@ class ReaderBase:
         self.ydim = ydim
         self.xdim = xdim
         self.locdim = locdim
-        self.gridtype = gridtype
 
         # additional arguments related to grid setup
         self.bbox = bbox
@@ -92,40 +91,20 @@ class ReaderBase:
 
         # infer the coordinates and grid
         if lat is not None or lon is not None:
-            # lat and lon are passed as arrays and we don't need to infer the
-            # values
-            (
-                self.lat,
-                self.lon,
-                self.latname,
-                self.lonname,
-                self.ydim,
-                self.xdim,
-            ) = self._coordinfo_from_args(lat, lon)
+            self.gridinfo = self._gridinfo_from_latlon(lat, lon, gridtype)
         else:
-            (
-                self.lat,
-                self.lon,
-                self.latname,
-                self.lonname,
-                self.ydim,
-                self.xdim,
-            ) = self._coordinfo_from_dataset(ds)
-
-        # now we can infer the gridtype
-        if self.gridtype == "infer":
-            if locdim is not None:
-                self.gridtype = "unstructured"
-            else:
-                if self.lat.ndim == 2:
-                    self.gridtype = "curvilinear"
-                elif self.lat.ndim == 1:
-                    self.gridtype = "regular"
-                else:  # pragma: no cover
-                    raise ReaderError("Coordinate array must have 1 or 2 dimensions!")
+            self.gridinfo = self._gridinfo_from_dataset(ds, gridtype)
+        self.lat = self.gridinfo.lat
+        self.lon = self.gridinfo.lon
+        self.latname = self.gridinfo.latname
+        self.lonname = self.gridinfo.lonname
+        self.ydim = self.gridinfo.ydim
+        self.xdim = self.gridinfo.xdim
+        self.locdim = self.gridinfo.locdim
+        self.gridtype = self.gridinfo.gridtype
 
         if construct_grid:
-            self.grid = self.grid_from_latlon(self.lat, self.lon, self.gridtype)
+            self.grid = self.finalize_grid(self.gridinfo.construct_grid())
         else:
             self.grid = None
         # Done!
@@ -138,7 +117,7 @@ class ReaderBase:
         array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
         return global_attrs, array_attrs
 
-    def _coordinfo_from_dataset(self, ds):
+    def _gridinfo_from_dataset(self, ds, gridtype: str):
         # we have to infer the lat/lon values from the dataset
         lat, lon = self._latlon_from_dataset(ds)
         # infer latname/lonname and ydim/xdim from lat/lon coordinate arrays
@@ -165,7 +144,7 @@ class ReaderBase:
         # regular grid that we want to infer. Then we have to transform them to
         # 1D. In this case the ydim is the latitude dimension and the xdim is
         # the longitude dimension
-        if self.gridtype == "regular" and lat.ndim == 2:
+        if gridtype == "regular" and lat.ndim == 2:
             axis = list(lat.dims).index(ydim)
             lat = self._1d_coord_from_2d(lat, axis)
             axis = list(lon.dims).index(xdim)
@@ -173,7 +152,18 @@ class ReaderBase:
         # we want the coordinate arrays to be numpy arrays
         lat = np.asarray(lat)
         lon = np.asarray(lon)
-        return lat, lon, latname, lonname, ydim, xdim
+        if gridtype == "infer":
+            gridtype = self._infer_gridtype(lat, lon)
+        return GridInfo(
+            lat,
+            lon,
+            gridtype,
+            latname=latname,
+            lonname=lonname,
+            ydim=ydim,
+            xdim=xdim,
+            locdim=self.locdim,
+        )
 
     def _latlon_from_dataset(self, ds) -> Tuple[xr.DataArray, xr.DataArray]:
         if self.latname is None and self.lonname is None:
@@ -190,21 +180,37 @@ class ReaderBase:
             )
         return lat, lon
 
-    def _coordinfo_from_args(self, lat, lon):
+    def _gridinfo_from_latlon(self, lat, lon, gridtype):
         assert (
             lat is not None and lon is not None
         ), "'lat' and 'lon' must both be specified or both be omitted!"
-        assert not (self.ydim is None or self.xdim is None), (
-            "If 'lat' and 'lon' values are passed, 'ydim' and 'xdim' must"
-            " be specified!"
-        )
         lat = self._coord_from_argument(lat)
         lon = self._coord_from_argument(lon)
-        # lat, lon are np.ndarrays here, so we can't infer the name from
-        # the metadata
+        if gridtype == "infer":
+            gridtype = self._infer_gridtype(lat, lon)
         latname = self.latname if self.latname is not None else "lat"
         lonname = self.lonname if self.lonname is not None else "lon"
-        return lat, lon, latname, lonname, self.ydim, self.xdim
+        return GridInfo(
+            lat,
+            lon,
+            gridtype,
+            latname=latname,
+            lonname=lonname,
+            ydim=self.ydim,
+            xdim=self.xdim,
+            locdim=self.locdim,
+        )
+
+    def _infer_gridtype(self, lat, lon):
+        if self.locdim is not None:
+            gridtype = "unstructured"
+        elif lat.ndim == 2:
+            gridtype = "curvilinear"
+        elif lat.ndim == 1:
+            gridtype = "regular"
+        else:
+            raise ReaderError("Coordinate array must have 1 or 2 dimensions!")
+        return gridtype
 
     def _coord_from_argument(self, coord):
         if isinstance(coord, np.ndarray):
@@ -245,19 +251,6 @@ class ReaderBase:
         if np.any(np.isnan(coord)):  # pragma: no cover
             raise ReaderError("Inferred coordinate values contain NaN!")
         return coord
-
-    def grid_from_latlon(self, lat: np.ndarray, lon: np.ndarray, gridtype):
-        if gridtype == "regular":
-            grid = gridfromdims(lon, lat)
-        elif gridtype == "curvilinear":
-            grid = BasicGrid(lon.ravel(), lat.ravel())
-        elif gridtype == "unstructured":
-            grid = BasicGrid(lon, lat)
-        else:  # pragma: no cover
-            raise ReaderError(
-                "gridtype must be 'regular', 'curvilinear', or 'unstructured'"
-            )
-        return self.finalize_grid(grid)
 
     def finalize_grid(self, grid):
         """
@@ -313,6 +306,74 @@ class ReaderBase:
             if vname is not None and vname not in varnames:
                 varnames.append(vname)
         return varnames
+
+
+class GridInfo:
+    # The pygeogrids.grids are not well suited for regular and curvilinear
+    # grids, therefore we create a wrapper class that contains all the
+    # necessary data to also have 2D grids.
+
+    def __init__(
+        self,
+        lat: np.ndarray,
+        lon: np.ndarray,
+        gridtype: str,
+        latname="lat",
+        lonname="lon",
+        ydim="y",
+        xdim="x",
+        locdim="loc",
+    ):
+        assert gridtype in ["regular", "curvilinear", "unstructured"]
+        self.lat = lat
+        self.lon = lon
+        self.gridtype = gridtype
+        self.latname = latname
+        self.lonname = lonname
+        if gridtype == "regular":
+            self.ydim = latname
+            self.xdim = lonname
+            self.locdim = None
+            self.shape = (len(lat), len(lon))
+        elif gridtype == "curvilinear":
+            self.ydim = ydim
+            self.xdim = xdim
+            self.locdim = None
+            self.shape = lat.shape
+        elif gridtype == "unstructured":
+            self.ydim = self.xdim = None
+            self.locdim = locdim
+            self.shape = len(lat)
+        else:  # pragma: no cover
+            raise ReaderError(
+                "gridtype must be 'regular', 'curvilinear', or 'unstructured'"
+            )
+
+    @classmethod
+    def from_grid(
+        cls,
+        grid: BasicGrid,
+        gridtype: str,
+        **kwargs,
+    ):
+        obj = cls(grid.activearrlat, grid.activearrlon, gridtype, **kwargs)
+        obj.grid = grid
+        return obj
+
+    def construct_grid(self):
+        if hasattr(self, "grid"):
+            return self.grid
+        if self.gridtype == "regular":
+            grid = gridfromdims(self.lon, self.lat)
+        elif self.gridtype == "curvilinear":
+            grid = BasicGrid(self.lon.ravel(), self.lat.ravel())
+        elif self.gridtype == "unstructured":
+            grid = BasicGrid(self.lon, self.lat)
+        else:  # pragma: no cover
+            raise ReaderError(
+                "gridtype must be 'regular', 'curvilinear', or 'unstructured'"
+            )
+        return grid
 
 
 class LevelSelectionMixin:

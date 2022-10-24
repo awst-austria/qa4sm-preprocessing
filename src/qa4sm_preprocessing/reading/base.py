@@ -56,7 +56,7 @@ class ReaderBase:
         # variable names
         if varnames is None:
             varnames = list(ds.data_vars)
-        elif isinstance(varnames, str):
+        elif isinstance(varnames, str):  # pragma: no cover
             varnames = [varnames]
         self.varnames = list(varnames)
         if timename is None:
@@ -208,7 +208,7 @@ class ReaderBase:
             gridtype = "curvilinear"
         elif lat.ndim == 1:
             gridtype = "regular"
-        else:
+        else:  # pragma: no cover
             raise ReaderError("Coordinate array must have 1 or 2 dimensions!")
         return gridtype
 
@@ -283,6 +283,7 @@ class ReaderBase:
                 deltalat = np.max(grid.activearrlat) - np.min(grid.activearrlat)
                 deltalon = np.max(grid.activearrlon) - np.min(grid.activearrlon)
                 self.cellsize = 30 * np.sqrt(deltalat * deltalon / len(grid.activegpis))
+                logging.info(f"Inferred cell size for cell grid: {self.cellsize:.3f}°")
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
             logging.debug(f"finalize_grid: Number of grid cells: {num_cells}")

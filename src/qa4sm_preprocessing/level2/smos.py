@@ -1,17 +1,23 @@
 import xarray as xr
+import logging
+import numpy as np
+from pathlib import Path
+from typing import Union, List
 
 from pygeogrids.netcdf import load_grid
 
 from qa4sm_preprocessing.reading.base import GridInfo
-from .base import L2Reader, _repurpose_level2_parse_cli_args, _repurpose_level2_cli
+from .base import L2Reader, _repurpose_level2_parse_cli_args
 
 
-_smos_gridfile = "5deg_SMOSL2_grid.nc"
+_smos_gridfile = Path(__file__).parent / "5deg_SMOSL2_grid.nc"
 
 
 class SMOSL2Reader(L2Reader):
-    def __init__(self, directory, varnames=None):
-        if varnames is None:
+    def __init__(
+        self, directory: Union[Path, str], varnames: Union[List[str], str] = None
+    ):
+        if varnames is None:  # pragma: no branc
             varnames = [
                 "Soil_Moisture",
                 "Soil_Moisture_DQX",
@@ -38,7 +44,7 @@ class SMOSL2Reader(L2Reader):
         grid = load_grid(_smos_gridfile)
         return GridInfo.from_grid(grid, "unstructured")
 
-    def _read_l2_file(self, fname):
+    def _read_l2_file(self, fname: Union[Path, str]):
         data = {}
         # we first have to open without mask_and_scale to figure out the right
         # datatype, because otherwise the fill values will lead to type conversion
@@ -48,8 +54,10 @@ class SMOSL2Reader(L2Reader):
         acq_time = (
             ds.Days.astype("timedelta64[D]") + ds.Seconds.astype("timedelta64[s]")
         ).values
-        # convert to seconds as float
+        # set zeros to NaN
         seconds_since_2000 = acq_time.astype("timedelta64[s]").astype(float)
+        # convert to seconds as float
+        seconds_since_2000[seconds_since_2000 == 0] = np.nan
         data["acquisition_time"] = seconds_since_2000
 
         # get data types
@@ -62,7 +70,7 @@ class SMOSL2Reader(L2Reader):
         gpi = ds["Grid_Point_ID"].values
         return data, gpi
 
-    def _variable_metadata(self, fname):
+    def _variable_metadata(self, fname: Union[Path, str]):
         ds = xr.open_dataset(fname, decode_cf=False, mask_and_scale=False)
         attrs = {
             var: dict(ds[var].attrs)
@@ -75,18 +83,28 @@ class SMOSL2Reader(L2Reader):
         }
         return attrs
 
-    def _global_metadata(self, fname):
+    def _global_metadata(self, fname: Union[Path, str]):
         return {
             "name": "SMOS_L2",
             "description": "L2 Soil Moisture Output User Data Product",
         }
 
+    def repurpose(self, *args, **kwargs):
+        return super().repurpose(*args, **kwargs, timevarname="acquisition_time")
+
 
 def _repurpose_smosl2_cli():
+    # to be called from the command-line via
+    # repurpose_smosl2 <input_path> <output_path>
     args = _repurpose_level2_parse_cli_args(
         "Process SMOS level 2 orbit files to timeseries."
     )
-    _repurpose_level2_cli(
-        args,
-        SMOSL2Reader(args.input_path, varnames=args.parameter),
+    logging.basicConfig(level=logging.INFO, filename=args.logfile)
+    reader = SMOSL2Reader(args.input_path, varnames=args.parameter)
+    reader.repurpose(
+        args.output_path,
+        start=args.start,
+        end=args.end,
+        overwrite=args.overwrite,
+        memory=args.memory,
     )

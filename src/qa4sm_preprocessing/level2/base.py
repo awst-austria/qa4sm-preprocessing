@@ -73,7 +73,7 @@ class L2Reader(DirectoryImageReader):
             If the grid is unstructured, a single array of grid indices,
             otherwise a tuple of column indices and row indices.
         """
-        ...
+        ...  # pragma: no cover
 
     @property
     @abstractmethod
@@ -87,22 +87,22 @@ class L2Reader(DirectoryImageReader):
         "%Y%m%dT%H%M%S". If it has another format, the ``fmt`` keyword has to
         be passed to the constructor.
         """
-        ...
+        ...  # pragma: no cover
 
     @abstractmethod
     def _gridinfo(self) -> GridInfo:
         # override, should return a GridInfo object
-        ...
+        ...  # pragma: no cover
 
     @abstractmethod
     def _variable_metadata(self) -> Mapping[str, Mapping[str, str]]:
         # override, should return a dictionary of variable names mapping to
         # variable attributes (which is also a dictionary)
-        ...
+        ...  # pragma: no cover
 
     def _global_metadata(self) -> dict:
         # should also be overriden, but default is to not override anything
-        return {}
+        return {}  # pragma: no cover
 
     def __init__(
         self,
@@ -135,7 +135,7 @@ class L2Reader(DirectoryImageReader):
             # self.grid = False, so we have to set it after the constructor
             construct_grid=False,
         )
-        self.grid = gridinfo.construct_grid()
+        self.grid = self.finalize_grid(gridinfo.construct_grid())
 
     def _read_single_file(self, fname, tstamps) -> Mapping[str, np.ndarray]:
         # overrides the DirectoryImageReader function to be more specific to L2
@@ -168,22 +168,22 @@ class L2Reader(DirectoryImageReader):
         # the _open_dataset method should return a xarray Dataset, but we don't
         # want to do the effort of creating one every time a file is read,
         # therefore we override _read_single_file and disable _open_dataset
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
 
-def _repurpose_level2_parse_cli_args(description):
+def _repurpose_level2_parse_cli_args(description):  # pragma: no cover
     parser = argparse.ArgumentParser(description)
     parser.add_argument("input_path", help="Path where the L2 data is stored.")
     parser.add_argument("output_path", help="Path where the output should be stored.")
 
     parser.add_argument(
-        "start",
+        "--start",
         type=mkdate,
         help=("Startdate. Either in format YYYY-MM-DD or " "YYYY-MM-DDTHH:MM."),
         default=None,
     )
     parser.add_argument(
-        "end",
+        "--end",
         type=mkdate,
         help=("Enddate. Either in format YYYY-MM-DD or " "YYYY-MM-DDTHH:MM."),
         default=None,
@@ -217,15 +217,3 @@ def _repurpose_level2_parse_cli_args(description):
         help="Parameters to process.",
     )
     return parser.parse_args()
-
-
-def _repurpose_level2_cli(cli_args, reader):
-    args = cli_args
-    logging.basicConfig(level=logging.INFO, filename=args.logfile)
-    reader.repurpose(
-        args.output_path,
-        start=args.start,
-        end=args.end,
-        overwrite=args.overwrite,
-        memory=args.memory,
-    )

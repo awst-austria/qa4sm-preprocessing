@@ -1,14 +1,20 @@
+import numpy as np
 import h5py
+import logging
+from pathlib import Path
+from typing import Union, List
 import xarray as xr
 
 from qa4sm_preprocessing.reading.base import GridInfo
-from .base import L2Reader, _repurpose_level2_parse_cli_args, _repurpose_level2_cli
+from .base import L2Reader, _repurpose_level2_parse_cli_args
 
-_smapl2_gridfile = "NSIDC0772_LatLon_EASE2_M36km_v1.0.nc"
+_smapl2_gridfile = Path(__file__).parent / "NSIDC0772_LatLon_EASE2_M36km_v1.0.nc"
 
 
 class SMAPL2Reader(L2Reader):
-    def __init__(self, directory, varnames=None):
+    def __init__(
+        self, directory: Union[Path, str], varnames: Union[List[str], str] = None
+    ):
         if varnames is None:
             varnames = list(self._variable_metadata(None).keys())
         super().__init__(
@@ -20,9 +26,10 @@ class SMAPL2Reader(L2Reader):
     def _time_regex_pattern(self):
         return r"SMAP_L2_SM_P_[0-9]+_[AD]+_([0-9T]+)_R.*.h5"
 
-    def _read_l2_file(self, fname):
+    def _read_l2_file(self, fname: Union[Path, str]):
         with h5py.File(fname) as f:
             sm = f["Soil_Moisture_Retrieval_Data"]["soil_moisture"][:]
+            sm[sm == -9999] = np.nan
             flag = f["Soil_Moisture_Retrieval_Data"]["retrieval_qual_flag"][:]
             time = f["Soil_Moisture_Retrieval_Data"]["tb_time_seconds"][:]
             col_idx = f["Soil_Moisture_Retrieval_Data"]["EASE_column_index"][:]
@@ -36,7 +43,7 @@ class SMAPL2Reader(L2Reader):
         ncgrid = xr.open_dataset(_smapl2_gridfile)
         return GridInfo(ncgrid.latitude.values, ncgrid.longitude.values, "curvilinear")
 
-    def _variable_metadata(self, fname):
+    def _variable_metadata(self, fname: Union[Path, str]):
         return {
             "soil_moisture": {
                 "long_name": "Volumetric soil moisture",
@@ -61,7 +68,7 @@ class SMAPL2Reader(L2Reader):
             },
         }
 
-    def _global_metadata(self, fname):
+    def _global_metadata(self, fname: Union[Path, str]):
         return {
             "abstract": (
                 "Passive soil moisture estimates onto a 36-km global Earth-fixed grid,"
@@ -90,12 +97,22 @@ class SMAPL2Reader(L2Reader):
             "UUID": "9fca619b-2d2c-40fb-a682-dcc4f1be0e20",
         }
 
+    def repurpose(self, *args, **kwargs):
+        return super().repurpose(*args, **kwargs, timevarname="acquisition_time")
+
 
 def _repurpose_smapl2_cli():
+    # to be called from the command-line via
+    # repurpose_smapl2 <input_path> <output_path>
     args = _repurpose_level2_parse_cli_args(
         "Process SMAP level 2 orbit files to timeseries."
     )
-    _repurpose_level2_cli(
-        args,
-        SMAPL2Reader(args.input_path, varnames=args.parameter),
+    logging.basicConfig(level=logging.INFO, filename=args.logfile)
+    reader = SMAPL2Reader(args.input_path, varnames=args.parameter)
+    reader.repurpose(
+        args.output_path,
+        start=args.start,
+        end=args.end,
+        overwrite=args.overwrite,
+        memory=args.memory,
     )

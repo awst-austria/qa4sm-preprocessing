@@ -23,7 +23,9 @@ class _TimeModificationMixin:
     def _modify_time(self, df):
         if self.timevarname is not None and self.timevarname in df:
             cf_unit = self._get_time_unit()
-            unit, _, start_date = cf_unit.split(" ")
+            split = cf_unit.split(" ")
+            unit = split[0]
+            start_date = " ".join(split[2:])
             np_unit = numpy_timeoffsetunit(unit)
             start = np.datetime64(start_date)
             values = df[self.timevarname].values

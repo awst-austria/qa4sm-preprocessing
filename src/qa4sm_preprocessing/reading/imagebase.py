@@ -2,6 +2,7 @@ from abc import abstractmethod
 import dask
 import dask.array as da
 import datetime
+import logging
 import numpy as np
 from pathlib import Path
 import shutil
@@ -243,10 +244,13 @@ class ImageReaderBase(ReaderBase):
             {self.timename: 0}
         )
         img = self._stack(img)
-        data = {
-            varname: img[varname].values[self.grid.activegpis]
-            for varname in self.varnames
-        }
+        data = {}
+        for varname in self.varnames:
+            var = img[varname].values
+            if len(var) == len(self.grid.activegpis):
+                data[varname] = var
+            else:
+                data[varname] = var[self.grid.activegpis]
         metadata = {varname: img[varname].attrs.copy() for varname in self.varnames}
         img = Image(
             self.grid.arrlon,
@@ -305,6 +309,7 @@ class ImageReaderBase(ReaderBase):
             testimg = self._testimg()
             array_attrs = {v: testimg[v].attrs.copy() for v in self.varnames}
             n = nimages_for_memory(testimg, memory)
+            logging.info(f"Reading {n} images at once.")
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
@@ -323,5 +328,8 @@ class ImageReaderBase(ReaderBase):
             reshuffler.calc()
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 self.use_tqdm = orig_tqdm
+        else:
+            logging.info(f"Output path already exists: {str(outpath)}")
+                
         reader = GriddedNcOrthoMultiTs(str(outpath), **reader_kwargs)
         return reader

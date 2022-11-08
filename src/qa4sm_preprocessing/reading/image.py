@@ -656,7 +656,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                 tmp_block_dict = self._read_all_files(times_to_read, False)
                 for varname in self.varnames:
                     block_dict[varname].append(
-                        np.mean(tmp_block_dict[varname], axis=0)
+                        np.nanmean(tmp_block_dict[varname], axis=0)
                     )
             # now we just have to convert the lists of arrays to array stacks
             for varname in self.varnames:

@@ -655,9 +655,14 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                 times_to_read = self._output_tstamp_map[tstamp]
                 tmp_block_dict = self._read_all_files(times_to_read, False)
                 for varname in self.varnames:
-                    block_dict[varname].append(
-                        np.nanmean(tmp_block_dict[varname], axis=0)
-                    )
+                    with warnings.catch_warnings():
+                        # otherwise lots of warnings for mean of empty slice
+                        warnings.filterwarnings(action="ignore", 
+                                                message="Mean of empty slice")
+                        block_dict[varname].append(
+                            np.nanmean(tmp_block_dict[varname], axis=0)
+                        )
+
             # now we just have to convert the lists of arrays to array stacks
             for varname in self.varnames:
                 block_dict[varname] = np.stack(block_dict[varname], axis=0)

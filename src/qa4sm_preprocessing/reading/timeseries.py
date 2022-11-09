@@ -1,17 +1,23 @@
 from abc import abstractmethod
+import datetime
+import logging
 import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
+import shutil
+from tqdm.auto import tqdm
 from typing import Union, Iterable, Sequence
 import warnings
 import xarray as xr
 
-from pygeogrids.netcdf import load_grid
+from pygeogrids.grids import BasicGrid
+from pygeogrids.netcdf import load_grid, save_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
+from pynetcf.time_series import GriddedNcContiguousRaggedTs
 
 from .base import ReaderBase
-from .utils import numpy_timeoffsetunit
+from .utils import numpy_timeoffsetunit, infer_cellsize
 
 
 class _TimeModificationMixin:
@@ -46,7 +52,177 @@ class _TimeModificationMixin:
         return df
 
 
-class StackTs(ReaderBase, _TimeModificationMixin):
+class _TimeseriesRepurposeMixin:
+
+    @property
+    @abstractmethod
+    def _ioclass(self):  # pragma: no cover
+        ...
+
+    def repurpose(
+        self,
+        outpath: Union[Path, str],
+        start: Union[datetime.datetime, str] = None,
+        end: Union[datetime.datetime, str] = None,
+        overwrite: bool = False,
+        **ioclass_kwargs,
+    ):
+        """
+        Transforms the single contiguous ragged netCDF array to multiple files
+        in the pynetcf format.
+
+        Parameters
+        ----------
+        outpath : str or path
+            Directory name where the timeseries files are written to.
+        start : str or datetime.datetime, optional
+            Processing start time
+        end : str or datetime.datetime, optional
+            Processing end time
+        overwrite: bool, optional (default: False)
+            Whether to overwrite existing directories. If set to False, the
+            function will return a reader for the existing directory.
+        **ioclass_kwargs: additional keyword arguments for the pynetcf
+          timeseries reader.
+
+        Returns
+        -------
+        reader : GriddedNcContiguousRaggedTs
+            Reader for the timeseries files.
+        """
+        outpath = Path(outpath)
+        if start is not None or end is not None:
+            assert start is not None and end is not None, (
+                "If 'start' or 'end' is given, the other one also"
+                " needs to be set."
+            )
+            period = (start, end)
+        else:
+            period = None
+        if (outpath / "grid.nc").exists() and overwrite:
+            shutil.rmtree(outpath)
+        ioclass = self._ioclass
+        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
+            outpath.mkdir(exist_ok=True, parents=True)
+
+            io = ioclass(outpath, self.grid, mode="w")
+            attrs = {v: dict(self.data[v].attrs) for v in self.varnames}
+            # loop over cells and the write each cell separately
+            for cell in tqdm(self.grid.get_cells()):
+                cell_gpis, cell_lons, cell_lats = self.grid.grid_points_for_cell(
+                    cell)
+                for gpi in cell_gpis:
+                    ts = self.read(gpi, period=period)
+                    io._write_gp(gpi, ts, attributes=attrs)
+            save_grid(outpath / "grid.nc", self.grid)
+        else:
+            logging.info(f"Output path already exists: {str(outpath)}")
+        io = ioclass(str(outpath), self.grid, **ioclass_kwargs, mode="r")
+        return io
+
+
+class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
+    def __init__(
+        self,
+        ts_path,
+        grid: Union[BasicGrid, Path, str] = None,
+        timevarname: str = None,
+        timeoffsetvarname: str = "time_offset",
+        timeoffsetunit: str = "seconds",
+        read_bulk: bool = None,
+        kd_tree_name: str = "pykdtree",
+        **kwargs,
+    ):
+        """
+        Class for reading time series in pynetcf format after reshuffling.
+
+        Parameters
+        ----------
+        ts_path : str
+            Directory where the netcdf time series files are stored
+        grid : BasicGrid or str, optional
+            BasicGrid or path to grid file, that is used to organize the
+            location of time series to read. If None is passed, grid.nc is
+            searched for in the ts_path.
+        read_bulk : boolean, optional (default: None)
+            If set to True (default) the data of all locations is read into
+            memory, and subsequent calls to read_ts read from the cache and not
+            from disk this makes reading complete files faster.
+        timevarname : str, optional (default: None)
+            Name of the time variable (absolute time) to use instead of the
+            original timestamps.
+        timeoffsetvarname : str, optional (default: None)
+            Name of the time offset variable name (relative to original
+            timestamps).
+        timeoffsetunit : str, optional (default: None)
+            The unit of the time offset. Required if `timeoffsetvarname` is not
+            ``None``. Valid values are "seconds"/, "minutes", "hours", "days".
+        kd_tree_name : str, optional (default: "pykdtree")
+            Name of the Kd-tree engine used in the grid. Available options are
+            "pykdtree" and "scipy".
+
+        Additional keyword arguments
+        ----------------------------
+        parameters : list, optional (default: None)
+            Specific variable names to read, if None are selected, all are
+            read.
+        offsets : dict, optional (default: None)
+            Offsets (values) that are added to the parameters (keys)
+        scale_factors : dict, optional (default:None)
+            Offset (value) that the parameters (key) is multiplied with
+        ioclass_kws: dict
+
+        Optional keyword arguments to pass to OrthoMultiTs class:
+        ---------------------------------------------------------
+        read_dates : boolean, optional (default: False)
+            if false dates will not be read automatically but only on specific
+            request useable for bulk reading because currently the netCDF
+            num2date routine is very slow for big datasets
+        """
+        if grid is None:  # pragma: no branch
+            grid = os.path.join(ts_path, "grid.nc")
+        if isinstance(grid, (str, Path)):
+            grid = load_grid(grid, kd_tree_name=kd_tree_name)
+        assert isinstance(grid, BasicGrid)
+
+        ioclass_kws = kwargs.get("ioclass_kws", {})
+        if "ioclass_kws" in kwargs:
+            del kwargs["ioclass_kws"]
+        # if read_bulk is not given, we use the value from ioclass_kws, or True
+        # if this is also given. Otherwise we overwrite the value in
+        # ioclass_kws
+        if read_bulk is None:
+            read_bulk = ioclass_kws.get("read_bulk", True)
+        else:
+            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
+                warnings.warn(
+                    f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
+                    f" {ioclass_kws['read_bulk']}. The first takes precedence."
+                )
+        ioclass_kws["read_bulk"] = read_bulk
+        super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
+        self.timevarname = timevarname
+        self.timeoffsetvarname = timeoffsetvarname
+        self.timeoffsetunit = timeoffsetunit
+
+    def read(self, *args, **kwargs) -> pd.DataFrame:
+        # already support the period kwarg
+        df = super().read(*args, **kwargs)
+        df = self._modify_time(df)
+        return df
+
+    def _get_time_unit(self):
+        return self.dataset.variables[self.timevarname].units
+
+    @property
+    def dataset(self):
+        if self.fid is not None:
+            return self.fid.dataset
+        else:
+            return None
+
+
+class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
     """
     Wrapper for xarray.Dataset when timeseries of the data should be read.
 
@@ -190,7 +366,7 @@ class StackTs(ReaderBase, _TimeModificationMixin):
         self.timeoffsetvarname = timeoffsetvarname
         self.timeoffsetunit = timeoffsetunit
 
-    def read(self, *args, **kwargs) -> pd.Series:
+    def read(self, *args, period=None, **kwargs) -> pd.Series:
         """
         Reads variable timeseries from dataset.
 
@@ -227,98 +403,96 @@ class StackTs(ReaderBase, _TimeModificationMixin):
         else:
             data = self.data[{self.locdim: gpi}]
         df = data.to_pandas()[self.varnames]
-        return self._modify_time(df)
+        df = self._modify_time(df)
+        if period is not None:
+            df = df[period[0]:period[1]]
+        return df
 
     def _get_time_unit(self):
         return self.data[self.timevarname].attrs["units"]
 
+    @property
+    def _ioclass(self):
+        return GriddedNcOrthoMultiTs
 
-class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
+
+class ContiguousRaggedTs(GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+    """
+    Reader for contiguous ragged timeseries arrays for QA4SM.
+
+    This is just an adaptation of the pynetcdf GriddedNcContiguousRaggedTs
+    class, and is not associated with the pynetcf ``ContiguousRaggedTs``.
+    """
+
     def __init__(
         self,
-        ts_path,
-        grid_path=None,
-        timevarname=None,
-        timeoffsetvarname="time_offset",
-        timeoffsetunit="seconds",
-        read_bulk=None,
-        kd_tree_name="pykdtree",
-        **kwargs,
+        ds: Union[xr.Dataset, Path, str],
+        cellsize=None,
+        latname="lat",
+        lonname="lon",
+        timename="time",
+        parameters=["soil_moisture"],
     ):
-        """
-        Class for reading time series in pynetcf format after reshuffling.
+        if isinstance(ds, (Path, str)):  # pragma: no branch
+            ds = xr.open_dataset(ds)
 
-        Parameters
-        ----------
-        ts_path : str
-            Directory where the netcdf time series files are stored
-        grid_path : str, optional
-            Path to grid file, that is used to organize the location of time
-            series to read. If None is passed, grid.nc is searched for in the
-            ts_path.
-        read_bulk : boolean, optional (default: None)
-            If set to True (default) the data of all locations is read into
-            memory, and subsequent calls to read_ts read from the cache and not
-            from disk this makes reading complete files faster.
-        timevarname : str, optional (default: None)
-            Name of the time variable (absolute time) to use instead of the
-            original timestamps.
-        timeoffsetvarname : str, optional (default: None)
-            Name of the time offset variable name (relative to original
-            timestamps).
-        timeoffsetunit : str, optional (default: None)
-            The unit of the time offset. Required if `timeoffsetvarname` is not
-            ``None``. Valid values are "seconds"/, "minutes", "hours", "days".
-        kd_tree_name : str, optional (default: "pykdtree")
-            Name of the Kd-tree engine used in the grid. Available options are
-            "pykdtree" and "scipy".
+        # infer the grid
+        lat = ds[latname].values
+        lon = ds[lonname].values
+        grid = BasicGrid(lon, lat)
+        if cellsize is None:  # pragma: no cover
+            cellsize = infer_cellsize(grid)
+        cellgrid = grid.to_cell_grid(cellsize=cellsize)
+        super().__init__(None, cellgrid, parameters=parameters)
 
-        Additional keyword arguments
-        ----------------------------
-        parameters : list, optional (default: None)
-            Specific variable names to read, if None are selected, all are
-            read.
-        offsets : dict, optional (default: None)
-            Offsets (values) that are added to the parameters (keys)
-        scale_factors : dict, optional (default:None)
-            Offset (value) that the parameters (key) is multiplied with
-        ioclass_kws: dict
+        self.varnames = self.parameters  # for consistency with other readers
+        self.timename = timename
+        self.locname = "loc"
+        self.data = ds
 
-        Optional keyword arguments to pass to OrthoMultiTs class:
-        ---------------------------------------------------------
-        read_dates : boolean, optional (default: False)
-            if false dates will not be read automatically but only on specific
-            request useable for bulk reading because currently the netCDF
-            num2date routine is very slow for big datasets
-        """
-        if grid_path is None:  # pragma: no branch
-            grid_path = os.path.join(ts_path, "grid.nc")
-        grid = load_grid(grid_path, kd_tree_name=kd_tree_name)
+    def _read_gp(self, gpi, period=None, **kwargs) -> pd.DataFrame:
 
-        ioclass_kws = kwargs.get("ioclass_kws", {})
-        if "ioclass_kws" in kwargs:
-            del kwargs["ioclass_kws"]
-        # if read_bulk is not given, we use the value from ioclass_kws, or True
-        # if this is also given. Otherwise we overwrite the value in
-        # ioclass_kws
-        if read_bulk is None:
-            read_bulk = ioclass_kws.get("read_bulk", True)
-        else:
-            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
-                warnings.warn(
-                    f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
-                    f" {ioclass_kws['read_bulk']}. The first takes precedence."
-                )
-        ioclass_kws["read_bulk"] = read_bulk
-        super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
-        self.timevarname = timevarname
-        self.timeoffsetvarname = timeoffsetvarname
-        self.timeoffsetunit = timeoffsetunit
+        # the main challenge is to find the start and end index of the values
+        # and the times, this is done via the cumulative count and the count
+        # variable
+        end = int(self.data["cumulative_count"][gpi])
+        start = end - int(self.data["count"][gpi])
 
-    def read(self, *args, **kwargs) -> pd.DataFrame:
-        df = super().read(*args, **kwargs)
-        df = self._modify_time(df)
+        time = self.data[self.timename][start:end]
+        values = np.array([self.data[p][start:end].values for p in self.parameters]).T
+
+        df = pd.DataFrame(values, index=time, columns=self.parameters)
+        if period is not None:
+            df = df[period[0]:period[1]]
         return df
 
-    def _get_time_unit(self):
-        return self.fid.dataset.variables[self.timevarname].units
+    @property
+    def _ioclass(self):
+        return GriddedNcContiguousRaggedTs
+
+
+def make_contiguous_ragged_array(
+    timeseries: Sequence,
+    lons: Union[Sequence, np.ndarray],
+    lats: Union[Sequence, np.ndarray],
+    name: str = "soil_moisture",
+):
+
+    nloc = len(timeseries)
+    assert (
+        nloc == len(lons) == len(lats)
+    ), "'timeseries', 'lons', and 'lats' must all have the same length!"
+
+    ragged_ds = xr.Dataset()
+    ragged_ds["lon"] = ("loc", lons)
+    ragged_ds["lat"] = ("loc", lats)
+
+    times = np.concatenate([ts.index.values for ts in timeseries])
+    values = np.concatenate([ts.values for ts in timeseries])
+    count = np.array([len(ts) for ts in timeseries])
+
+    ragged_ds["time"] = ("loctime", times)
+    ragged_ds[name] = ("loctime", values)
+    ragged_ds["count"] = ("loc", count)
+    ragged_ds["cumulative_count"] = ("loc", np.cumsum(count))
+    return ragged_ds

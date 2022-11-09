@@ -1,4 +1,5 @@
 import datetime
+import logging
 from math import floor
 import numpy as np
 from typing import Sequence
@@ -83,3 +84,11 @@ def numpy_timeoffsetunit(unit):
         unit = "D"
     assert unit in ["s", "m", "h", "D"]
     return unit
+
+
+def infer_cellsize(grid):
+    deltalat = np.max(grid.activearrlat) - np.min(grid.activearrlat)
+    deltalon = np.max(grid.activearrlon) - np.min(grid.activearrlon)
+    cellsize = 30 * np.sqrt(deltalat * deltalon / len(grid.activegpis))
+    logging.info(f"Inferred cell size for cell grid: {cellsize:.3f}°")
+    return cellsize

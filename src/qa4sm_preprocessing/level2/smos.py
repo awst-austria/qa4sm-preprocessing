@@ -44,7 +44,9 @@ class SMOSL2Reader(L2Reader):
         grid = load_grid(_smos_gridfile)
         return GridInfo.from_grid(grid, "unstructured")
 
-    def _read_l2_file(self, fname: Union[Path, str]):
+    def _read_l2_file(
+        self, fname: Union[Path, str]
+    ) -> Tuple[Mapping[str, np.ndarray], Union[np.ndarray, Tuple[np.ndarray]]]:
         data = {}
         # we first have to open without mask_and_scale to figure out the right
         # datatype, because otherwise the fill values will lead to type conversion

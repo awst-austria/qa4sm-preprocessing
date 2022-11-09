@@ -9,6 +9,7 @@ from pygeogrids.grids import gridfromdims, BasicGrid
 
 from .exceptions import ReaderError
 from .cf import get_coord, get_time
+from .utils import infer_cellsize
 
 
 class ReaderBase:
@@ -277,13 +278,8 @@ class ReaderBase:
         logging.debug(f"finalize_grid: Number of active gpis: {num_gpis}")
 
         if hasattr(self, "cellsize"):  # pragma: no branch
-            if self.cellsize is None:
-                # Automatically set a suitable cell size, aiming at cell sizes
-                # of about 30**2 pixels.
-                deltalat = np.max(grid.activearrlat) - np.min(grid.activearrlat)
-                deltalon = np.max(grid.activearrlon) - np.min(grid.activearrlon)
-                self.cellsize = 30 * np.sqrt(deltalat * deltalon / len(grid.activegpis))
-                logging.info(f"Inferred cell size for cell grid: {self.cellsize:.3f}°")
+            if self.cellsize is None:  # pragma: no cover
+                self.cellsize = infer_cellsize(grid)
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
             logging.debug(f"finalize_grid: Number of grid cells: {num_cells}")

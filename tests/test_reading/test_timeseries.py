@@ -6,12 +6,12 @@ import pandas as pd
 import shutil
 import xarray as xr
 
-from pynetcf.time_series import GriddedNcContiguousRaggedTs
-
 from qa4sm_preprocessing.reading import (
     StackTs,
-    GriddedNcOrthoMultiTs,
+    StackImageReader,
     ContiguousRaggedTs,
+    GriddedNcOrthoMultiTs,
+    GriddedNcContiguousRaggedTs,
 )
 from qa4sm_preprocessing.reading.timeseries import make_contiguous_ragged_array
 
@@ -44,7 +44,7 @@ def test_StackTs_locdim(unstructured_test_dataset):
 def test_GriddedNcOrthoMultiTs(synthetic_test_args):
 
     ds, kwargs = synthetic_test_args
-    stack = StackTs(ds, ["X", "Y"], **kwargs)
+    stack = StackImageReader(ds, ["X", "Y"], **kwargs)
 
     tspath = test_data_path / "ts_test_path"
     tsreader = stack.repurpose(tspath, overwrite=True)
@@ -107,7 +107,7 @@ def test_GriddedNcOrthoMultiTs_timeoffset(synthetic_test_args):
 
     ds, kwargs = synthetic_test_args
     ds["time_offset"] = xr.ones_like(ds.X)
-    stack = StackTs(ds, **kwargs)
+    stack = StackImageReader(ds, **kwargs)
 
     tspath = test_data_path / "ts_test_path"
     # time_offset should be detected by default
@@ -126,7 +126,7 @@ def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
     newtime.attrs["units"] = "seconds since 2000-01-01"
     newtime.attrs["long_name"] = "exact observation time"
     ds["exact_time"] = newtime
-    stack = StackTs(ds, **kwargs)
+    stack = StackImageReader(ds, **kwargs)
 
     tspath = test_data_path / "ts_test_path"
     tsreader = stack.repurpose(tspath, timevarname="exact_time", overwrite=True)
@@ -139,7 +139,7 @@ def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
 def test_GriddedNcOrthoMultiTs_period(synthetic_test_args):
 
     ds, kwargs = synthetic_test_args
-    stack = StackTs(ds, **kwargs)
+    stack = StackImageReader(ds, **kwargs)
 
     tspath = test_data_path / "ts_test_path"
     start = "2000-01-01"
@@ -155,7 +155,7 @@ def test_GriddedNcOrthoMultiTs_period(synthetic_test_args):
 def test_GriddedNcOrthoMultiTs(synthetic_test_args):
 
     ds, kwargs = synthetic_test_args
-    stack = StackTs(ds, ["X", "Y"], **kwargs)
+    stack = StackImageReader(ds, ["X", "Y"], **kwargs)
 
     tspath = test_data_path / "ts_test_path"
     tsreader = stack.repurpose(tspath, overwrite=True)
@@ -249,7 +249,7 @@ def test_ContiguousRaggedTs():
 
     cells = ragged_tsreader.grid.get_cells()
     cellfnames = [f"{cell}.nc" for cell in cells]
-    assert os.listdir(tspath) == (cellfnames + ["grid.nc"])
+    assert sorted(os.listdir(tspath)) == sorted(cellfnames + ["grid.nc"])
     for i, fname in enumerate(cellfnames):
         ds = xr.open_dataset(tspath / fname)
         assert "soil_moisture" in ds.data_vars

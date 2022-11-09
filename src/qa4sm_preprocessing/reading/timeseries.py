@@ -14,14 +14,15 @@ import xarray as xr
 from pygeogrids.grids import BasicGrid
 from pygeogrids.netcdf import load_grid, save_grid
 from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
-from pynetcf.time_series import GriddedNcContiguousRaggedTs
+from pynetcf.time_series import (
+    GriddedNcContiguousRaggedTs as _GriddedNcContiguousRaggedTs,
+)
 
 from .base import ReaderBase
 from .utils import numpy_timeoffsetunit, infer_cellsize
 
 
 class _TimeModificationMixin:
-
     @abstractmethod
     def _get_time_unit(self):  # pragma: no cover
         ...
@@ -53,7 +54,6 @@ class _TimeModificationMixin:
 
 
 class _TimeseriesRepurposeMixin:
-
     @property
     @abstractmethod
     def _ioclass(self):  # pragma: no cover
@@ -87,14 +87,18 @@ class _TimeseriesRepurposeMixin:
 
         Returns
         -------
-        reader : GriddedNcContiguousRaggedTs
+        reader : GriddedTs
             Reader for the timeseries files.
+
+        Note
+        ----
+        Current implementation is not very fast because it loops over all grid
+        points.
         """
         outpath = Path(outpath)
         if start is not None or end is not None:
             assert start is not None and end is not None, (
-                "If 'start' or 'end' is given, the other one also"
-                " needs to be set."
+                "If 'start' or 'end' is given, the other one also" " needs to be set."
             )
             period = (start, end)
         else:
@@ -109,8 +113,7 @@ class _TimeseriesRepurposeMixin:
             attrs = {v: dict(self.data[v].attrs) for v in self.varnames}
             # loop over cells and the write each cell separately
             for cell in tqdm(self.grid.get_cells()):
-                cell_gpis, cell_lons, cell_lats = self.grid.grid_points_for_cell(
-                    cell)
+                cell_gpis, cell_lons, cell_lats = self.grid.grid_points_for_cell(cell)
                 for gpi in cell_gpis:
                     ts = self.read(gpi, period=period)
                     io._write_gp(gpi, ts, attributes=attrs)
@@ -121,7 +124,37 @@ class _TimeseriesRepurposeMixin:
         return io
 
 
-class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
+class _EasierGriddedNcMixin:
+    def _get_grid(self, ts_path, grid, kd_tree_name="pykdtree"):
+        if grid is None:  # pragma: no branch
+            grid = os.path.join(ts_path, "grid.nc")
+        if isinstance(grid, (str, Path)):
+            grid = load_grid(grid, kd_tree_name=kd_tree_name)
+        assert isinstance(grid, BasicGrid)
+        return grid
+
+    def _modify_kwargs(self, read_bulk, kwargs):
+        ioclass_kws = kwargs.get("ioclass_kws", {})
+        if "ioclass_kws" in kwargs:
+            del kwargs["ioclass_kws"]
+        # if read_bulk is not given, we use the value from ioclass_kws, or True
+        # if this is also given. Otherwise we overwrite the value in
+        # ioclass_kws
+        if read_bulk is None:
+            read_bulk = ioclass_kws.get("read_bulk", True)
+        else:
+            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
+                warnings.warn(
+                    f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
+                    f" {ioclass_kws['read_bulk']}. The first takes precedence."
+                )
+        ioclass_kws["read_bulk"] = read_bulk
+        return kwargs, ioclass_kws
+
+
+class GriddedNcOrthoMultiTs(
+    _GriddedNcOrthoMultiTs, _TimeModificationMixin, _EasierGriddedNcMixin
+):
     def __init__(
         self,
         ts_path,
@@ -179,27 +212,8 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
             request useable for bulk reading because currently the netCDF
             num2date routine is very slow for big datasets
         """
-        if grid is None:  # pragma: no branch
-            grid = os.path.join(ts_path, "grid.nc")
-        if isinstance(grid, (str, Path)):
-            grid = load_grid(grid, kd_tree_name=kd_tree_name)
-        assert isinstance(grid, BasicGrid)
-
-        ioclass_kws = kwargs.get("ioclass_kws", {})
-        if "ioclass_kws" in kwargs:
-            del kwargs["ioclass_kws"]
-        # if read_bulk is not given, we use the value from ioclass_kws, or True
-        # if this is also given. Otherwise we overwrite the value in
-        # ioclass_kws
-        if read_bulk is None:
-            read_bulk = ioclass_kws.get("read_bulk", True)
-        else:
-            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
-                warnings.warn(
-                    f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
-                    f" {ioclass_kws['read_bulk']}. The first takes precedence."
-                )
-        ioclass_kws["read_bulk"] = read_bulk
+        grid = self._get_grid(ts_path, grid, kd_tree_name)
+        kwargs, ioclass_kws = self._modify_kwargs(read_bulk, kwargs)
         super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
         self.timevarname = timevarname
         self.timeoffsetvarname = timeoffsetvarname
@@ -220,6 +234,57 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
             return self.fid.dataset
         else:  # pragma: no cover
             return None
+
+
+class GriddedNcContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _EasierGriddedNcMixin):
+    def __init__(
+        self,
+        ts_path,
+        grid: Union[BasicGrid, Path, str] = None,
+        read_bulk: bool = None,
+        kd_tree_name: str = "pykdtree",
+        **kwargs,
+    ):
+        """
+        Class for reading time series in pynetcf format after reshuffling.
+
+        Parameters
+        ----------
+        ts_path : str
+            Directory where the netcdf time series files are stored
+        grid : BasicGrid or str, optional
+            BasicGrid or path to grid file, that is used to organize the
+            location of time series to read. If None is passed, grid.nc is
+            searched for in the ts_path.
+        read_bulk : boolean, optional (default: None)
+            If set to True (default) the data of all locations is read into
+            memory, and subsequent calls to read_ts read from the cache and not
+            from disk this makes reading complete files faster.
+        kd_tree_name : str, optional (default: "pykdtree")
+            Name of the Kd-tree engine used in the grid. Available options are
+            "pykdtree" and "scipy".
+
+        Additional keyword arguments
+        ----------------------------
+        parameters : list, optional (default: None)
+            Specific variable names to read, if None are selected, all are
+            read.
+        offsets : dict, optional (default: None)
+            Offsets (values) that are added to the parameters (keys)
+        scale_factors : dict, optional (default:None)
+            Offset (value) that the parameters (key) is multiplied with
+        ioclass_kws: dict
+
+        Optional keyword arguments to pass to OrthoMultiTs class:
+        ---------------------------------------------------------
+        read_dates : boolean, optional (default: False)
+            if false dates will not be read automatically but only on specific
+            request useable for bulk reading because currently the netCDF
+            num2date routine is very slow for big datasets
+        """
+        grid = self._get_grid(ts_path, grid, kd_tree_name)
+        kwargs, ioclass_kws = self._modify_kwargs(read_bulk, kwargs)
+        super().__init__(ts_path, grid, ioclass_kws=ioclass_kws, **kwargs)
 
 
 class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
@@ -405,7 +470,7 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
         df = data.to_pandas()[self.varnames]
         df = self._modify_time(df)
         if period is not None:
-            df = df[period[0]:period[1]]
+            df = df[period[0] : period[1]]
         return df
 
     def _get_time_unit(self):
@@ -416,7 +481,7 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
         return GriddedNcOrthoMultiTs
 
 
-class ContiguousRaggedTs(GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
     """
     Reader for contiguous ragged timeseries arrays for QA4SM.
 
@@ -427,14 +492,24 @@ class ContiguousRaggedTs(GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin)
     def __init__(
         self,
         ds: Union[xr.Dataset, Path, str],
+        varnames: Union[str, Sequence] = None,
         cellsize=None,
         latname="lat",
         lonname="lon",
         timename="time",
-        parameters=["soil_moisture"],
+        countname="count",
+        cumulative_countname="cumulative_count",
     ):
         if isinstance(ds, (Path, str)):  # pragma: no cover
             ds = xr.open_dataset(ds)
+        if varnames is None:
+            varnames = list(
+                set(ds.data_vars)
+                - set([latname, lonname, timename, countname, cumulative_countname])
+            )
+        elif isinstance(varnames, str):  # pragma: no cover
+            varnames = [varnames]
+        self.varnames = list(varnames)
 
         # infer the grid
         lat = ds[latname].values
@@ -443,9 +518,8 @@ class ContiguousRaggedTs(GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin)
         if cellsize is None:  # pragma: no cover
             cellsize = infer_cellsize(grid)
         cellgrid = grid.to_cell_grid(cellsize=cellsize)
-        super().__init__(None, cellgrid, parameters=parameters)
+        super().__init__(None, cellgrid, parameters=varnames)
 
-        self.varnames = self.parameters  # for consistency with other readers
         self.timename = timename
         self.locname = "loc"
         self.data = ds
@@ -463,7 +537,7 @@ class ContiguousRaggedTs(GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin)
 
         df = pd.DataFrame(values, index=time, columns=self.parameters)
         if period is not None:
-            df = df[period[0]:period[1]]
+            df = df[period[0] : period[1]]
         return df
 
     @property

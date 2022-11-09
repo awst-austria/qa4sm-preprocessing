@@ -99,7 +99,7 @@ class _TimeseriesRepurposeMixin:
             period = (start, end)
         else:
             period = None
-        if (outpath / "grid.nc").exists() and overwrite:
+        if (outpath / "grid.nc").exists() and overwrite:  # pragma: no branch
             shutil.rmtree(outpath)
         ioclass = self._ioclass
         if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
@@ -218,7 +218,7 @@ class GriddedNcOrthoMultiTs(_GriddedNcOrthoMultiTs, _TimeModificationMixin):
     def dataset(self):
         if self.fid is not None:
             return self.fid.dataset
-        else:
+        else:  # pragma: no cover
             return None
 
 
@@ -433,7 +433,7 @@ class ContiguousRaggedTs(GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin)
         timename="time",
         parameters=["soil_moisture"],
     ):
-        if isinstance(ds, (Path, str)):  # pragma: no branch
+        if isinstance(ds, (Path, str)):  # pragma: no cover
             ds = xr.open_dataset(ds)
 
         # infer the grid

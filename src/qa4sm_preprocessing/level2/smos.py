@@ -2,7 +2,7 @@ import xarray as xr
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Union, List
+from typing import Union, List, Tuple, Mapping
 
 from pygeogrids.netcdf import load_grid
 

@@ -1,3 +1,5 @@
+from io import StringIO
+import logging
 import numpy as np
 import os
 import pandas as pd
@@ -9,7 +11,7 @@ from pynetcf.time_series import GriddedNcContiguousRaggedTs
 from qa4sm_preprocessing.reading import (
     StackTs,
     GriddedNcOrthoMultiTs,
-    ContiguousRaggedTs
+    ContiguousRaggedTs,
 )
 from qa4sm_preprocessing.reading.timeseries import make_contiguous_ragged_array
 
@@ -134,6 +136,22 @@ def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
     assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
 
 
+def test_GriddedNcOrthoMultiTs_period(synthetic_test_args):
+
+    ds, kwargs = synthetic_test_args
+    stack = StackTs(ds, **kwargs)
+
+    tspath = test_data_path / "ts_test_path"
+    start = "2000-01-01"
+    end = "2000-01-04"
+    tsreader = stack.repurpose(tspath, start=start, end=end, overwrite=True)
+
+    df = tsreader.read(0)
+    assert list(df.columns) == ["X", "Y"]
+    idx = {v: 0 for v in set(ds.dims) - set(["time"])}
+    assert df.equals(ds.isel(**idx).to_dataframe().loc[start:end, ["X", "Y"]])
+
+
 def test_GriddedNcOrthoMultiTs(synthetic_test_args):
 
     ds, kwargs = synthetic_test_args
@@ -224,6 +242,9 @@ def test_ContiguousRaggedTs():
     assert isinstance(gridded_tsreader, GriddedNcContiguousRaggedTs)
 
     for i in range(3):
+        # test if ragged reader returns the same as we put in
+        assert ragged_tsreader.read(i)["soil_moisture"].equals(timeseries[i])
+        # test if ragged reader returns the same as gridded reader
         assert ragged_tsreader.read(i).equals(gridded_tsreader.read(i))
 
     cells = ragged_tsreader.grid.get_cells()
@@ -234,3 +255,25 @@ def test_ContiguousRaggedTs():
         assert "soil_moisture" in ds.data_vars
         assert np.abs(ds.lat.values[0] - lats[i]) < 1e-6
         assert np.abs(ds.lon.values[0] - lons[i]) < 1e-6
+
+    # test if overwrite works by capturing the log message
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    logger = logging.getLogger("root")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    ragged_tsreader.repurpose(tspath, overwrite=False)
+    handler.flush()
+    output = stream.getvalue()
+    assert output == f"Output path already exists: {str(tspath)}\n"
+
+    # test if repurposing only a shorter period also works
+    start = "2020-01-01"
+    end = "2020-06-01"
+    gridded_tsreader = ragged_tsreader.repurpose(
+        tspath, overwrite=True, start=start, end=end
+    )
+
+    for i in range(3):
+        ts = gridded_tsreader.read(i)["soil_moisture"]
+        assert ts.equals(ragged_tsreader.read(i).loc[start:end, "soil_moisture"])

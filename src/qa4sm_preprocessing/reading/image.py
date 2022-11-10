@@ -5,7 +5,9 @@ Developer's guide
 The ``DirectoryImageReader`` aims to provide an easy to use class to read
 directories of single images, to either create a single image stack file, a
 transposed stack (via ``write_transposed_dataset``), or a cell-based timeseries
-dataset (via the ``repurpose`` method).
+dataset (via the ``repurpose`` method). At the same time, the
+``DirectoryImageReader`` aims to be easy to subclass for specific, more
+complicated datasets.
 
 The advantage over ``xr.open_mfdataset`` is that the reader typically does not
 need to open each dataset to get information on coordinates. Instead, the
@@ -39,11 +41,11 @@ The main routines that should be modified when subclassing are:
 * ``_landmask_from_dataset``: If a landmask is required (only if the ``read``
   function is used), and it cannot be read with ``_open_dataset`` and also not
   with other options. Should not be necessary very often.
-* ``_read_single_file``: normally this calls ``_open_dataset`` and then returns
-  the data as dictionary that maps from variable names to 3d data arrays (numpy
-  or dask, dimensions should be time, lat, lon). If it is hard to read the data
-  as xr.Dataset, so that overriding `_open_dataset` is not feasible, this could
-  be overriden instead, but then all the other routines for obtaining
+* ``_read_file``: normally this calls ``_open_dataset`` and then returns the
+  data as dictionary that maps from variable names to 3d data arrays (numpy or
+  dask, dimensions should be time, lat, lon). If it is hard to read the data as
+  xr.Dataset, so that overriding `_open_dataset` is not feasible, this could be
+  overriden instead, but then all the other routines for obtaining
   grid/metadata/landmask info also have to be overriden.
 
 In the following some examples for subclassing are provided.
@@ -144,7 +146,7 @@ grid). A reader could look like this::
                 timestamps=[pd.Timedelta("6H"), pd.Timedelta("18H")]
             )
 
-        def _open_dataset(self, fname):
+        def _read_file(self, fname):
             # This function only reads the actual data, but not the coordinates
             # to avoid having to read and construct the coordinates in every
             # step.
@@ -154,23 +156,20 @@ grid). A reader could look like this::
                     sm = self._read_overpass(f, op)
                     sm_arrs.append(sm)
             # Now we have read the AM and PM retrievals, but we still need to
-            # concatenate them along a new time axis. We don't have to set the
-            # actual time values, since they will be inferred from the filename
-            # in combination with the timestamps passed in the constructor.
-            sm = xr.concat(sm_arrs, dim="time")
-            return sm.to_dataset(name="SMAP_L3_SM")
+            # concatenate them along the time axis.
+            sm = np.vstack(sm_arrs)
+            return {"SMAP_L3_SM": sm}
 
         def _read_overpass(self, f, op):
-            # This function reads the data of a single overpass and puts it
-            # into a xarray Dataset, but without specifying coordinate values
-            # (only dimensions are set).
+            # This function reads the data of a single overpass returns it as
+            # numpy array
             names = self.overpass_dict[op]
             g = f[names["group"]]
             sm = np.ma.masked_equal(g[names["sm"]][...], -9999)
             qc = g[names["qc"]][...]
             valid = (qc & 1) == 0
             sm = np.ma.masked_where(~valid, sm).filled(np.nan)
-            return xr.DataArray(sm, dims=["lat", "lon"])
+            return sm[np.newaxis, ...]
 
         def _latlon_from_dataset(self, fname):
             # This method is called from the constructor of base.ReaderBase and
@@ -182,6 +181,15 @@ grid). A reader could look like this::
                 lat = self._1d_coord_from_2d(g["latitude"], 0, fill_value=-9999)
                 lon = self._1d_coord_from_2d(g["longitude"], 1, fill_value=-9999)
             return lat, lon
+
+        def _metadata_from_dataset(self, fname):
+            array_attrs =  {"SMAP_L3_SM": {"long_name": "soil moisture",
+                                           "units": "m^3/m^3"}}
+            global_attrs = {"title": "SMAP level 3 soil moisture"}
+            return global_attrs, array_attrs
+
+        def _dtype_from_dataset(self, fname):
+            return {"SMAP_L3_SM": float}
 
         @property
         def overpass_dict(self):
@@ -198,9 +206,10 @@ grid). A reader could look like this::
                 }
             }
 
-In this example we also adapted ``_latlon_from_dataset``. Instead, we could
-have just read the latitude and longitude in ``_open_dataset`` and added them
-as coordinates to the ``xr.Dataset``, but this way we don't have to read the
+In this example we also adapted ``_latlon_from_dataset``,
+``_metadata_from_dataset``, and ``_dtype_from_dataset``. Instead, we could have
+just read the latitude and longitude in ``_open_dataset`` and added them as
+coordinates to the ``xr.Dataset``, but this way we don't have to read the
 latitude and longitude arrays every time we open a file.
 
 More advanced cases
@@ -208,9 +217,8 @@ More advanced cases
 
 If even less information can be obtained from the files, e.g. if the filenames
 don't contain timestamps, it might be necessary to also override
-`_tstamps_in_file`, `_metadata_from_dataset`, or
-`_landmask_from_dataset`. Since these are edge cases, they are not shown in
-detail here, but it works similar to the other examples.
+`_tstamps_in_file`. Since this is an edge cases, it is not shown in detail
+here, but it works similar to the other examples.
 """
 
 import dask

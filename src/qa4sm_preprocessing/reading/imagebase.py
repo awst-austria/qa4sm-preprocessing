@@ -80,6 +80,50 @@ class ImageReaderBase(ReaderBase):
     def timestamps(self):
         return self._timestamps
 
+    @property
+    def imgshape(self):
+        if self.gridtype == "regular":
+            return (len(self.lat), len(self.lon))
+        else:
+            # for curvilinear and unstructured grids, the latitude has the same
+            # shape as the data
+            return self.lat.shape
+
+    @property
+    def imgndim(self):
+        if self.gridtype == "unstructured":
+            return 1
+        else:
+            return 2
+
+    def get_blockshape(self, ntime):
+        return tuple([ntime] + list(self.imgshape))
+
+    def _empty_blockdict(self, ntime):
+        shape = self.get_blockshape(ntime)
+        return {
+            v: np.empty(shape, dtype=self.dtype[v])
+            for v in self.varnames
+        }
+
+    def get_coords_dims(self, times):
+        coords = {}
+        coords[self.timename] = times
+        if self.gridtype == "regular":
+            # we can simply wrap the data with time, lat, and lon
+            coords[self.latname] = self.lat
+            coords[self.lonname] = self.lon
+            dims = (self.timename, self.latname, self.lonname)
+        elif self.gridtype == "curvilinear":
+            coords[self.latname] = ([self.ydim, self.xdim], self.lat)
+            coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
+            dims = (self.timename, self.ydim, self.xdim)
+        else:  # unstructured grid
+            coords[self.latname] = (self.locdim, self.lat.data)
+            coords[self.lonname] = (self.locdim, self.lon.data)
+            dims = (self.timename, self.locdim)
+        return coords, dims
+
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
@@ -169,21 +213,7 @@ class ImageReaderBase(ReaderBase):
 
         # Now we have to set the coordinates/dimensions correctly.  This works
         # differently depending on how the original data is structured:
-        coords = {}
-        coords[self.timename] = times
-        if self.gridtype == "regular":
-            # we can simply wrap the data with time, lat, and lon
-            coords[self.latname] = self.lat
-            coords[self.lonname] = self.lon
-            dims = (self.timename, self.latname, self.lonname)
-        elif self.gridtype == "curvilinear":
-            coords[self.latname] = ([self.ydim, self.xdim], self.lat)
-            coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
-            dims = (self.timename, self.ydim, self.xdim)
-        else:  # unstructured grid
-            coords[self.latname] = (self.locdim, self.lat.data)
-            coords[self.lonname] = (self.locdim, self.lon.data)
-            dims = (self.timename, self.locdim)
+        coords, dims = self.get_coords_dims(times)
         arrays = {
             name: (dims, data, array_attrs[name]) for name, data in block_dict.items()
         }

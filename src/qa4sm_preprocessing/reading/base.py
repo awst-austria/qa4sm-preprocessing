@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from typing import Union, Iterable, Sequence, Tuple, Dict
+from typing import Union, Iterable, Sequence, Tuple, Mapping
 import warnings
 import xarray as xr
 import cf_xarray  # noqa
@@ -89,6 +89,7 @@ class ReaderBase:
 
         # infer metadata
         self.global_attrs, self.array_attrs = self._metadata_from_dataset(ds)
+        self.dtype = self._dtype_from_dataset(ds)
 
         # infer the coordinates and grid
         if lat is not None or lon is not None:
@@ -113,7 +114,11 @@ class ReaderBase:
     def _landmask_from_dataset(self, ds: xr.Dataset, landmask) -> xr.DataArray:
         return ds[landmask]
 
-    def _metadata_from_dataset(self, ds: xr.Dataset) -> Tuple[Dict, Dict]:
+    def _dtype_from_dataset(self, ds: xr.Dataset) -> Mapping:
+        # this also works if ds is a dictionary of numpy arrays
+        return {v: ds[v].dtype for v in self.varnames}
+
+    def _metadata_from_dataset(self, ds: xr.Dataset) -> Tuple[Mapping, Mapping]:
         global_attrs = dict(ds.attrs)
         array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
         return global_attrs, array_attrs
@@ -283,7 +288,6 @@ class ReaderBase:
             grid = grid.to_cell_grid(cellsize=self.cellsize)
             num_cells = len(grid.get_cells())
             logging.debug(f"finalize_grid: Number of grid cells: {num_cells}")
-
         return grid
 
     def _stack(self, img):

@@ -214,6 +214,7 @@ detail here, but it works similar to the other examples.
 """
 
 import dask
+import dask.array as da
 import datetime
 import numpy as np
 import glob
@@ -221,7 +222,7 @@ from pathlib import Path
 import pandas as pd
 import re
 from tqdm.auto import tqdm
-from typing import Union, Iterable, Sequence, Dict, Tuple, List
+from typing import Union, Iterable, Sequence, Mapping, Tuple, List
 import warnings
 import xarray as xr
 
@@ -437,6 +438,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         average: str = None,
         timestamps: Sequence[pd.Timedelta] = None,
         use_tqdm: bool = True,
+        use_dask: bool = False,
         **open_dataset_kwargs,
     ):
 
@@ -470,8 +472,8 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         self.rename = rename
         self.level = level
         self.transpose = transpose
-        self.average = average
         self.use_tqdm = use_tqdm
+        self.use_dask = use_dask
         self.fill_value = fill_value
 
         super().__init__(
@@ -497,30 +499,16 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
 
         # The next step is to create a map that links filepaths to available
         # timestamps
-        self._file_tstamp_map = {
+        file_tstamp_map = {
             path: self._tstamps_in_file(path, timestamps=timestamps)
             for path in filepaths
         }
-        # tstamp_file_map maps each timestamp to the file where it can be found
-        self.tstamp_file_map = {}
-        for fname, tstamps in self._file_tstamp_map.items():
-            for t in tstamps:
-                self.tstamp_file_map[t] = fname
-        self._available_timestamps = sorted(list(self.tstamp_file_map))
 
-        # If we do averaging, the timestamps exposed by the reader is not the
-        # same as the timestamps available on file
-        if self.average is not None:
-            self._output_tstamp_map = {}
-            for tstamp in self._available_timestamps:
-                output_tstamp = self._calculate_averaging_timestamp(tstamp)
-                if output_tstamp in self._output_tstamp_map:
-                    self._output_tstamp_map[output_tstamp].append(tstamp)
-                else:
-                    self._output_tstamp_map[output_tstamp] = [tstamp]
-            self._timestamps = sorted(list(self._output_tstamp_map))
+        if average is None:
+            self.blockreader = _BlockDataReader(self, file_tstamp_map)
         else:
-            self._timestamps = self._available_timestamps
+            self.blockreader = _AveragingBlockDataReader(self, file_tstamp_map, average)
+        self._timestamps = self.blockreader._timestamps
 
         if discard_attrs:
             self.discard_attrs()
@@ -541,22 +529,22 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         if fname == self._example_file:
             ds = self.example_dataset
         else:  # pragma: no cover
-            # Not tested because _open_datset(fname) is tested and this is not
+            # Not tested because _open_dataset(fname) is tested and this is not
             # a typical use case.
-            ds = self._open_dataset(fname)
+            ds = self._open_nice_dataset(fname)
         return super()._latlon_from_dataset(ds)
 
     def _metadata_from_dataset(
         self, fname: Union[Path, str]
-    ) -> Tuple[Dict, Dict]:
+    ) -> Tuple[Mapping, Mapping]:
         """Loads the metadata from a file"""
         # can be overriden for custom datasets
         if fname == self._example_file:
             ds = self.example_dataset
         else:  # pragma: no cover
-            # Not tested because _open_datset(fname) is tested and this is not
+            # Not tested because _open_dataset(fname) is tested and this is not
             # a typical use case.
-            ds = self._open_dataset(fname)
+            ds = self._open_nice_dataset(fname)
         return super()._metadata_from_dataset(ds)
 
     def _landmask_from_dataset(
@@ -567,8 +555,16 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         if fname == self._example_file:
             ds = self.example_dataset
         else:  # pragma: no cover
-            ds = self._open_dataset(fname)
+            ds = self._open_nice_dataset(fname)
         return super()._landmask_from_dataset(ds, landmask)
+
+    def _dtype_from_dataset(self, fname: Union[Path, str]) -> Mapping:
+        if fname == self._example_file:
+            # we need to use a copy here, because we modify the dataset
+            ds = self.example_dataset
+        else:  # pragma: no cover
+            ds = self._open_nice_dataset(fname)
+        return super()._dtype_from_dataset(ds)
 
     def _tstamps_in_file(
         self,
@@ -585,8 +581,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                 match = self.time_regex_pattern.findall(fname)
                 if not match:  # pragma: no cover
                     raise ReaderError(
-                        f"Pattern {self.time_regex_pattern} did not match "
-                        f"{fname}"
+                        f"Pattern {self.time_regex_pattern} did not match " f"{fname}"
                     )
                 timestring = match[0]
             else:
@@ -601,8 +596,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             ds = self._open_dataset(path)
             if self.timename not in ds.indexes:  # pragma: no cover
                 raise ReaderError(
-                    f"Time dimension {self.timename} does not exist in "
-                    f"{str(path)}"
+                    f"Time dimension {self.timename} does not exist in " f"{str(path)}"
                 )
             time = ds.indexes[self.timename]
             timestamps = [t.to_pydatetime() for t in time]
@@ -610,117 +604,37 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
 
     @property
     def example_dataset(self) -> xr.Dataset:
-        if (
-            not hasattr(self, "_example_dataset")
-            or self._example_dataset is None
-        ):
+        if not hasattr(self, "_example_dataset") or self._example_dataset is None:
             self._example_dataset = self._open_nice_dataset(self._example_file)
         return self._example_dataset
-
-    def _calculate_averaging_timestamp(self, tstamp) -> datetime.datetime:
-        if self.average == "daily":
-            date = tstamp.date()
-            return datetime.datetime(date.year, date.month, date.day)
-        else:
-            raise NotImplementedError("only average='daily' is implemented")
 
     def discard_attrs(self):
         self.global_attrs = {}
         self.array_attrs = {v: {} for v in self.varnames}
 
-    def _read_block(
-        self, start, end
-    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:
+    def _read_block(self, start, end) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
 
-        # reading a block:
-        # - find output timestamps in given range
-        # - if output timestamps == available timestamps
-        #   - for required each file, read the required arrays and stack the
-        #     stacks onto each other
-        # - if averaging has to be done:
-        #   - for each output timestamp:
-        #     - do same procedure as above, then take the mean
-        #   - stack all images
         times = self.tstamps_for_daterange(start, end)
-        if self.average is None:
-            block_dict = self._read_all_files(times, self.use_tqdm)
-        else:
-            # If we have to average multiple images to a single image, we will
-            # read image by image
-            block_dict = {varname: [] for varname in self.varnames}
-            if self.use_tqdm:  # pragma: no branch
-                times = tqdm(times)
-            for tstamp in times:
-                # read all sub-images that have to be averaged later on
-                times_to_read = self._output_tstamp_map[tstamp]
-                tmp_block_dict = self._read_all_files(times_to_read, False)
-                for varname in self.varnames:
-                    with warnings.catch_warnings():
-                        # otherwise lots of warnings for mean of empty slice
-                        warnings.filterwarnings(action="ignore", 
-                                                message="Mean of empty slice")
-                        block_dict[varname].append(
-                            np.nanmean(tmp_block_dict[varname], axis=0)
-                        )
+        return self.blockreader.read_timestamps(times)
 
-            # now we just have to convert the lists of arrays to array stacks
-            for varname in self.varnames:
-                block_dict[varname] = np.stack(block_dict[varname], axis=0)
-        return block_dict
-
-    def _read_single_file(self, fname, tstamps) -> dict:
-        """
-        Reads a single file and returns a dictionary mapping variable names to
-        numpy arrays. Can be overriden in case it's easier to provide this
-        format than xarray datasets.
-        """
+    def _read_file(
+        self, fname: Union[Path, str]
+    ) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
+        # this function reads a xr.Dataset and converts it to the dictionary
+        # format that is used internally
         ds = self._open_nice_dataset(fname)
-        block_dict = {}
-        for varname in self.varnames:
-            arr = ds[varname]
-            if self.timename in arr.dims:
-                # if there are multiple timestamps in each file, reading is
-                # a bit more complicated. In the easiest case, we have as
-                # many timestamps as there are in the file, and we can just
-                # return it.
-                # Otherwise, if time is a coordinate, we can use
-                # .sel(tstamps). If this is also not the case, we need to
-                # find the indices of tstamps in the file
-                if len(tstamps) != len(arr[self.timename]):
-                    if self.timename in arr.coords:
-                        arr = arr.sel({self.timename: tstamps})
-                    else:
-                        all_tstamps = self._file_tstamp_map[fname]
-                        ids = [all_tstamps.index(ts) for ts in tstamps]
-                        arr = arr.isel({self.timename: ids})
-                block_dict[varname] = arr.data
-            else:
-                block_dict[varname] = arr.data[np.newaxis, ...]
-        return block_dict
-
-    def _read_all_files(self, times, use_tqdm):
-        # first we need to find all files that we have to visit, and remember
-        # the timestamps that we need from this file
-        file_tstamp_map = {}
-        for tstamp in times:
-            fname = self.tstamp_file_map[tstamp]
-            if fname in file_tstamp_map:
-                file_tstamp_map[fname].append(tstamp)
-            else:
-                file_tstamp_map[fname] = [tstamp]
-
-        # now we can open each file and extract the timestamps we need
-        block_dict = {varname: [] for varname in self.varnames}
-        iterator = file_tstamp_map.items()
-        if use_tqdm:  # pragma: no branch
-            iterator = tqdm(iterator)
-        for fname, tstamps in iterator:
-            _blockdict = self._read_single_file(fname, tstamps)
-            for varname in block_dict:
-                block_dict[varname].append(_blockdict[varname])
-        for varname in self.varnames:
-            block_dict[varname] = np.vstack(block_dict[varname])
-        return block_dict
+        data = {}
+        for v in self.varnames:
+            arr = ds[v].data
+            if arr.ndim == self.imgndim:
+                # we need to add a time axis
+                arr = arr[np.newaxis, ...]
+            elif arr.ndim >= self.imgndim + 2:
+                raise ReaderError(
+                    f"Data with shape {arr.shape} has wrong number of dimensions"
+                )
+            data[v] = arr
+        return data
 
     def _make_nicer_ds(self, ds: xr.Dataset) -> xr.Dataset:
         if self.fill_value is not None:
@@ -828,8 +742,228 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                     new_varnames.append(l2name)
                 else:
                     warnings.warn(
-                        f"Skipping variable '{l2name}' because it does"
-                        " not exist!"
+                        f"Skipping variable '{l2name}' because it does" " not exist!"
                     )
             varnames = new_varnames
         return varnames, rename, level
+
+
+class _BlockDataReader:
+    # class for internal use to move some of the complexity of the mapping of
+    # timestamps to files out of the reader, in the hope to make it easier for
+    # people to subclass the DirectoryImageReader.
+
+    def __init__(self, directoryreader, file_tstamp_map, use_tqdm: bool = True):
+        self.directoryreader = directoryreader
+        self._file_tstamp_map = file_tstamp_map
+        self._use_tqdm = use_tqdm  # can only be used to turn it off
+        # invert file_tstamp_map
+        self.tstamp_file_map = {}
+        for fname, tstamps in self._file_tstamp_map.items():
+            for t in tstamps:
+                self.tstamp_file_map[t] = fname
+
+    @property
+    def _timestamps(self):
+        return sorted(list(self.tstamp_file_map))
+
+    @property
+    def varnames(self):
+        return self.directoryreader.varnames
+
+    @property
+    def use_dask(self):
+        return self.directoryreader.use_dask
+
+    @property
+    def use_tqdm(self):
+        # using tqdm for a progressbar only makes sense if we do not use dask
+        # otherwise it's better to use dask's diagnostic tools
+        return self.directoryreader.use_tqdm and self._use_tqdm and not self.use_dask
+
+    def get_file_tstamp_map(self, timestamps):
+        # Here we need to get the file_tstamp_map limited to a selection of
+        # timestamps. To get it, we use the inverse map (tstamp_file_map),
+        # select our timestamps, and invert it again.
+        file_tstamp_map = {}
+        for tstamp in timestamps:
+            fname = self.tstamp_file_map[tstamp]
+            if fname in file_tstamp_map:
+                file_tstamp_map[fname].append(tstamp)
+            else:
+                file_tstamp_map[fname] = [tstamp]
+        return file_tstamp_map
+
+    def read_timestamps(self, timestamps: Sequence[datetime.datetime]):
+        block_dict = {v: [] for v in self.varnames}
+        iterator = self.get_file_tstamp_map(timestamps).items()
+        if self.use_tqdm:
+            iterator = tqdm(iterator)
+        for fname, tstamps in iterator:
+            cur_blockdict = self.read_timestamps_from_file(fname, tstamps)
+            for v in self.varnames:
+                block_dict[v].append(cur_blockdict[v])
+        return self._assemble_blockdict(block_dict)
+
+    def read_timestamps_from_file(self, fname, timestamps):
+        # this just handles dask, the actual implementation is in
+        # self._read_single_file_timestamps
+        if self.use_dask:
+            ntime = len(timestamps)
+            shape = self.directoryreader.get_blockshape(ntime)
+            delayed_blockdict = dask.delayed(self._read_single_file_timestamps)(
+                fname, timestamps
+            )
+            blockdict = {
+                v: dask.array.from_delayed(
+                    delayed_blockdict[v], shape=shape, chunks=shape, dtype=self.dtype[v]
+                )
+                for v in self.varnames
+            }
+            return blockdict
+        else:
+            return self._read_single_file_timestamps(fname, timestamps)
+
+    def _read_single_file_timestamps(self, fname, timestamps):
+        data = self.directoryreader._read_file(fname)
+        ntime_should = len(timestamps)
+        actual_ntime = data[self.varnames[0]].shape[0]
+        if ntime_should < actual_ntime:
+            # There are some timestamps in the data that we are not interested
+            # in. We assume that the timestamps in the file are ordered, so we
+            # can just check the indices of the timestamps we want and extract
+            # the corresponding data.
+            tstamps_in_file = self._file_tstamp_map[fname]
+            ids = [tstamps_in_file.index(ts) for ts in timestamps]
+            data = {v: data[v][ids, ...] for v in data}
+        return data
+
+        block_dict = {}
+        for varname in self.varnames:
+            arr = ds[varname]
+            if self.timename in arr.dims:
+                # if there are multiple timestamps in each file, reading is
+                # a bit more complicated. In the easiest case, we have as
+                # many timestamps as there are in the file, and we can just
+                # return it.
+                # Otherwise, if time is a coordinate, we can use
+                # .sel(tstamps). If this is also not the case, we need to
+                # find the indices of tstamps in the file
+                if len(tstamps) != len(arr[self.timename]):
+                    if self.timename in arr.coords:
+                        arr = arr.sel({self.timename: tstamps})
+                    else:
+                        all_tstamps = self._file_tstamp_map[fname]
+                        ids = [all_tstamps.index(ts) for ts in tstamps]
+                        arr = arr.isel({self.timename: ids})
+                block_dict[varname] = arr.data
+            else:
+                block_dict[varname] = arr.data[np.newaxis, ...]
+        return block_dict
+
+        return data
+
+    def _read_single_file(self, fname, tstamps) -> dict:
+        """
+        Reads a single file and returns a dictionary mapping variable names to
+        numpy arrays. Can be overriden in case it's easier to provide this
+        format than xarray datasets.
+        """
+        ds = self._open_nice_dataset(fname)
+        block_dict = {}
+        for varname in self.varnames:
+            arr = ds[varname]
+            if self.timename in arr.dims:
+                # if there are multiple timestamps in each file, reading is
+                # a bit more complicated. In the easiest case, we have as
+                # many timestamps as there are in the file, and we can just
+                # return it.
+                # Otherwise, if time is a coordinate, we can use
+                # .sel(tstamps). If this is also not the case, we need to
+                # find the indices of tstamps in the file
+                if len(tstamps) != len(arr[self.timename]):
+                    if self.timename in arr.coords:
+                        arr = arr.sel({self.timename: tstamps})
+                    else:
+                        all_tstamps = self._file_tstamp_map[fname]
+                        ids = [all_tstamps.index(ts) for ts in tstamps]
+                        arr = arr.isel({self.timename: ids})
+                block_dict[varname] = arr.data
+            else:
+                block_dict[varname] = arr.data[np.newaxis, ...]
+        return block_dict
+
+    def _assemble_blockdict(
+        self, blockdict: Mapping[str, Sequence[Union[np.ndarray, da.core.Array]]]
+    ) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
+        if self.use_dask:
+            vstack = da.vstack
+        else:
+            vstack = np.vstack
+        return {v: vstack(blockdict[v]) for v in blockdict}
+
+
+class _AveragingBlockDataReader(_BlockDataReader):
+    # The averaging reader does similar things than the block reader, but here
+    # we modify the _file_tstamp_map, to map from output (averaged) timestamps
+    # to timestamps on file. This means we will have the mapping the other way
+    # around, so we adapt ``get_file_tstamp_map`` and ``_timestamps`` to return
+    # the things we want.
+    # In read_timestamps_from_file, we just call another block reader to do the
+    # dirty work, and then average what we got from it.
+
+    def __init__(self, directoryreader, file_tstamp_map, average):
+        output_tstamp_map = {}
+        available_timestamps = sum(
+            [tstamps for tstamps in file_tstamp_map.values()], start=[]
+        )
+        for tstamp in available_timestamps:
+            output_tstamp = self.calculate_averaging_timestamp(average, tstamp)
+            if output_tstamp in output_tstamp_map:
+                output_tstamp_map[output_tstamp].append(tstamp)
+            else:
+                output_tstamp_map[output_tstamp] = [tstamp]
+        self._averaging_timestamps = sorted(list(output_tstamp_map))
+        super().__init__(directoryreader, output_tstamp_map)
+
+        # To remember the underlying mapping of actual timestamps to files, we
+        # will additionally initialize a "normal" block reader, which can then
+        # read the actual data.
+        self.blockreader = _BlockDataReader(
+            directoryreader, file_tstamp_map, use_tqdm=False
+        )
+
+    @property
+    def _timestamps(self):
+        return self._averaging_timestamps
+
+    def get_file_tstamp_map(self, timestamps):
+        # in this case we want to return all entries for the given timestamps,
+        # which is easier than for the _BlockDataReader
+        return {t: self._file_tstamp_map[t] for t in timestamps}
+
+    def calculate_averaging_timestamp(self, average, tstamp) -> datetime.datetime:
+        if average == "daily":
+            date = tstamp.date()
+            return datetime.datetime(date.year, date.month, date.day)
+        else:
+            raise NotImplementedError("only average='daily' is implemented")
+
+    def read_timestamps_from_file(self, fname, timestamps):
+
+        # The trick here is the following: AveragedTimestampReader is a
+        # BlockDataReader, therefore it will handle the looping over the
+        # individual output timestamps using the read_method defined in the
+        # BlockDataReader (which also handles all the dask stuff).
+        # But it also has it's own BlockReader instance, which is now called to
+        # do the dirty work.
+        data = self.blockreader.read_timestamps(timestamps)
+
+        # now we only have to do the averaging and return the data
+        for v in self.varnames:
+            # otherwise lots of warnings for mean of empty slice
+            warnings.filterwarnings(action="ignore", message="Mean of empty slice")
+            # take mean along first dimension (time dimension), but add it
+            # again so we have it in the shape the data is expected later on.
+            data[v] = np.nanmean(data[v], axis=0)[np.newaxis, ...]
+        return data

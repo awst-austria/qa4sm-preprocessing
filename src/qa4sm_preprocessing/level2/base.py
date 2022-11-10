@@ -137,7 +137,7 @@ class L2Reader(DirectoryImageReader):
         )
         self.grid = self.finalize_grid(gridinfo.construct_grid())
 
-    def _read_single_file(self, fname, tstamps) -> Mapping[str, np.ndarray]:
+    def _read_file(self, fname) -> Mapping[str, np.ndarray]:
         # overrides the DirectoryImageReader function to be more specific to L2
         # data where we normally don't get nice xarray datasets
         orbitdata, gridids = self._read_l2_file(fname)
@@ -163,6 +163,11 @@ class L2Reader(DirectoryImageReader):
         global_attrs = self._global_metadata(fname)
         array_attrs = self._variable_metadata(fname)
         return global_attrs, {v: array_attrs[v] for v in self.varnames}
+
+    def _dtype_from_dataset(self, fname: Union[Path, str]) -> Mapping:
+        # can also be overriden if the datatypes are known beforehand
+        data, _ = self._read_l2_file(fname)
+        return {v: data[v].dtype for v in data}
 
     def _open_dataset(self, fname):
         # the _open_dataset method should return a xarray Dataset, but we don't

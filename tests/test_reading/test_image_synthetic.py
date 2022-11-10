@@ -435,8 +435,8 @@ def test_directory_image_reader_multiple_timesteps(synthetic_test_args):
         **kwargs
     )
     ntime = len(reader.timestamps)
-    assert len(reader._file_tstamp_map) == ntime // 2
-    for tstamps in reader._file_tstamp_map.values():
+    assert len(reader.blockreader._file_tstamp_map) == ntime // 2
+    for tstamps in reader.blockreader._file_tstamp_map.values():
         assert len(tstamps) == 2
     validate_reader(reader, ds)
     make_clean_testdir()

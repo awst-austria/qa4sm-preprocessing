@@ -584,12 +584,18 @@ class ZippedCsvTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
         self.fnames = list(filter(lambda s: s.endswith(".csv"), namelist))
         lats = np.empty(len(self.fnames))
         lons = np.empty(len(self.fnames))
+        gpis = np.empty(len(self.fnames), dtype=int)
+        self.gpi_index_map = {}
         for i, name in enumerate(self.fnames):
+            gpi = int(re.findall(r".*gpi=([0-9]+).*\.csv", name)[0])
+            gpis[i] = gpi
+            # mapping from gpi to index for  _read_gp
+            self.gpi_index_map[gpi] = i
             lats[i] = float(re.findall(r".*lat=([0-9.]+).*\.csv", name)[0])
             lons[i] = float(re.findall(r".*lon=([0-9.]+).*\.csv", name)[0])
 
         # create grid object
-        grid = BasicGrid(lons, lats)
+        grid = BasicGrid(lons, lats, gpis=gpis)
         if cellsize is None:  # pragma: no cover
             cellsize = infer_cellsize(grid)
         cellgrid = grid.to_cell_grid(cellsize=cellsize)
@@ -619,7 +625,7 @@ class ZippedCsvTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
         return df
 
     def _read_gp(self, gpi, period=None, **kwargs) -> pd.DataFrame:
-        fname = self.fnames[gpi]
+        fname = self.fnames[self.gpi_index_map[gpi]]
         df = self._read_file(fname)[self.varnames]
         if period is not None:
             df = df.loc[period[0] : period[1]]

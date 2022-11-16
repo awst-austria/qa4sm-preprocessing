@@ -95,7 +95,7 @@ class ReaderBase:
         if lat is not None or lon is not None:
             self.gridinfo = self._gridinfo_from_latlon(lat, lon, gridtype)
         else:
-            self.gridinfo = self._gridinfo_from_dataset(ds, gridtype)
+            self.gridinfo = self._gridinfo_from_dataset(ds)
         self.lat = self.gridinfo.lat
         self.lon = self.gridinfo.lon
         self.latname = self.gridinfo.latname
@@ -123,68 +123,12 @@ class ReaderBase:
         array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
         return global_attrs, array_attrs
 
-    def _gridinfo_from_dataset(self, ds, gridtype: str):
-        # we have to infer the lat/lon values from the dataset
-        lat, lon = self._latlon_from_dataset(ds)
-        # infer latname/lonname and ydim/xdim from lat/lon coordinate arrays
-        # if latname is not None, this effectively does nothing
-        latname = lat.name
-        lonname = lon.name
-        assert lat.ndim in [1, 2], "Coordinates must have at most 2 dimensions."
-        if self.ydim is None and self.xdim is None:
-            # infer ydim and xdim from the coordinate arrays
-            if lat.ndim == 2:  # pragma: no branch
-                # for 2D coordinate arrays, both must have the same dims,
-                # the first one is the y-dim, the second one the x-dim
-                ydim, xdim = lat.dims
-            elif lat.ndim == 1:  # pragma: no branch
-                # for 1D coordinate arrays, the ydim is the latdim, the
-                # xdim is the londim
-                ydim = lat.dims[0]
-                xdim = lon.dims[0]
-        else:
-            ydim = self.ydim
-            xdim = self.xdim
+    def _shape_from_dataset(self, ds: xr.Dataset) -> Tuple:
+        return ds[self.varnames[0]].shape
 
-        # sometimes the coordinate arrays are 2D, but actually represent a
-        # regular grid that we want to infer. Then we have to transform them to
-        # 1D. In this case the ydim is the latitude dimension and the xdim is
-        # the longitude dimension
-        if gridtype == "regular" and lat.ndim == 2:
-            axis = list(lat.dims).index(ydim)
-            lat = self._1d_coord_from_2d(lat, axis)
-            axis = list(lon.dims).index(xdim)
-            lon = self._1d_coord_from_2d(lon, axis)
-        # we want the coordinate arrays to be numpy arrays
-        lat = np.asarray(lat)
-        lon = np.asarray(lon)
-        if gridtype == "infer":
-            gridtype = self._infer_gridtype(lat, lon)
-        return GridInfo(
-            lat,
-            lon,
-            gridtype,
-            latname=latname,
-            lonname=lonname,
-            ydim=ydim,
-            xdim=xdim,
-            locdim=self.locdim,
-        )
-
-    def _latlon_from_dataset(self, ds) -> Tuple[xr.DataArray, xr.DataArray]:
-        if self.latname is None and self.lonname is None:
-            # get specifications from CF conventions
-            lat = get_coord(ds, "latitude", alternatives=["lat", "LAT"])
-            lon = get_coord(ds, "longitude", alternatives=["lon", "LON"])
-        elif self.latname is not None and self.lonname is not None:
-            lat = ds[self.latname]
-            lon = ds[self.lonname]
-        else:  # pragma: no cover
-            raise ReaderError(
-                "'latname' and 'lonname' must either both be specified or"
-                " both be omitted!"
-            )
-        return lat, lon
+    def _gridinfo_from_dataset(self, ds):
+        return GridInfo.from_dataset(ds, latname=self.latname,
+                                     lonname=self.lonname, ydim=self.ydim, xdim=self.xdim)
 
     def _gridinfo_from_latlon(self, lat, lon, gridtype):
         assert (
@@ -193,7 +137,10 @@ class ReaderBase:
         lat = self._coord_from_argument(lat)
         lon = self._coord_from_argument(lon)
         if gridtype == "infer":
-            gridtype = self._infer_gridtype(lat, lon)
+            if self.locdim is not None:
+                gridtype = "unstructured"
+            else:
+                gridtype = GridInfo._infer_gridtype(lat, lon)
         latname = self.latname if self.latname is not None else "lat"
         lonname = self.lonname if self.lonname is not None else "lon"
         return GridInfo(
@@ -207,17 +154,6 @@ class ReaderBase:
             locdim=self.locdim,
         )
 
-    def _infer_gridtype(self, lat, lon):
-        if self.locdim is not None:
-            gridtype = "unstructured"
-        elif lat.ndim == 2:
-            gridtype = "curvilinear"
-        elif lat.ndim == 1:
-            gridtype = "regular"
-        else:  # pragma: no cover
-            raise ReaderError("Coordinate array must have 1 or 2 dimensions!")
-        return gridtype
-
     def _coord_from_argument(self, coord):
         if isinstance(coord, np.ndarray):
             # we already have it in the way we want
@@ -227,36 +163,6 @@ class ReaderBase:
             return np.round(np.arange(start, stop, step), 5)
         else:  # pragma: no cover
             raise ReaderError(f"Wrong specification of argument: {coord}")
-
-    def _1d_coord_from_2d(self, coord, axis, fill_value=-9999):
-        """
-        Converts a 2D coordinate array to a 1D array by taking the mean of
-        coordinate values along the other axis.
-
-        This only gives reasonable results if the 2D coordinate arrays are
-        tensor products of 1D coordinate arrays.
-
-        Parameters
-        ----------
-        coord : xr.DataArray or np.ndarray, 2D
-            2-dimensional array of coordinate values that can be reduced to a
-            1-dimensional representation.
-        axis : int
-            Axis of the **current** coordinate. The 1-dimensional array will be
-            retrieved by taking the mean over the **other** axis. E.g., for
-            getting latitude values, axis should probably be 0, since the
-            latitude axis is often the first axis.
-        fill_value : int, float, optional (default: -9999)
-            Additional fill values to set to NaN before taking the mean.
-        """
-        # if the coordinate is the first axis, we have to take the mean over
-        # the second one and vice versa
-        axis = (axis + 1) % 2
-        coord = np.ma.masked_equal(coord, fill_value)
-        coord = coord.mean(axis=axis).filled(np.nan)
-        if np.any(np.isnan(coord)):  # pragma: no cover
-            raise ReaderError("Inferred coordinate values contain NaN!")
-        return coord
 
     def finalize_grid(self, grid):
         """
@@ -361,6 +267,62 @@ class GridInfo:
         obj.grid = grid
         return obj
 
+    @classmethod
+    def from_dataset(
+        cls,
+        ds,
+        latname=None,
+        lonname=None,
+        ydim=None,
+        xdim=None,
+        make_1d=False,
+    ):
+        if latname is None and lonname is None:
+            # get specifications from CF conventions
+            lat = get_coord(ds, "latitude", alternatives=["lat", "LAT"])
+            lon = get_coord(ds, "longitude", alternatives=["lon", "LON"])
+            latname = lat.name
+            lonname = lon.name
+        elif latname is not None and lonname is not None:
+            lat = ds[latname]
+            lon = ds[lonname]
+        else:  # pragma: no cover
+            raise ReaderError(
+                "'latname' and 'lonname' must either both be specified or"
+                " both be omitted!"
+            )
+        assert lat.ndim in [1, 2], "Coordinates must have at most 2 dimensions."
+
+        if ydim is None or xdim is None:
+            if lat.ndim == 2:
+                ydim, xdim = lat.dims
+            else:
+                ydim = lat.dims[0]
+                xdim = lon.dims[0]
+
+        # infer gridtype
+        if lat.ndim == 2:
+            gridtype = "curvilinear"
+            locdim = None
+        elif ydim == xdim:
+            gridtype = "unstructured"
+            locdim = ydim
+        else:
+            gridtype = "regular"
+            locdim = None
+        
+        obj = cls(
+            lat.values,
+            lon.values,
+            gridtype,
+            latname=latname,
+            lonname=lonname,
+            ydim=ydim,
+            xdim=xdim,
+            locdim=locdim
+        )
+        return obj
+
     def construct_grid(self):
         if hasattr(self, "grid"):
             return self.grid
@@ -375,6 +337,26 @@ class GridInfo:
                 "gridtype must be 'regular', 'curvilinear', or 'unstructured'"
             )
         return grid
+
+    @staticmethod
+    def _infer_gridtype(lat: Union[np.ndarray, xr.DataArray], lon: Union[np.ndarray, xr.DataArray]):
+        if lat.ndim == 2:
+            gridtype = "curvilinear"
+        elif lat.ndim == 1:
+            if len(lat) != len(lon):
+                gridtype = "regular"
+            elif isinstance(lat, xr.DataArray) and isinstance(lon, xr.DataArray):
+                # easy way failed, let's see if we can get more info from
+                # metadata
+                if lat.dims == lon.dims:
+                    gridtype = "unstructured"
+                else:
+                    gridtype = "regular"
+            else:  # pragma: no cover
+                raise ReaderError("Inferring grid type failed, pass 'gridtype' explicitly.")
+        else:  # pragma: no cover
+            raise ReaderError("Coordinate array must have 1 or 2 dimensions!")
+        return gridtype
 
 
 class LevelSelectionMixin:
@@ -427,3 +409,34 @@ class LevelSelectionMixin:
                     tmp_list.append((tmpname, tmparr))
             output_list = tmp_list
         return output_list
+
+
+def _1d_coord_from_2d(coord, axis, fill_value=-9999):
+    """
+    Converts a 2D coordinate array to a 1D array by taking the mean of
+    coordinate values along the other axis.
+
+    This only gives reasonable results if the 2D coordinate arrays are
+    tensor products of 1D coordinate arrays.
+
+    Parameters
+    ----------
+    coord : xr.DataArray or np.ndarray, 2D
+        2-dimensional array of coordinate values that can be reduced to a
+        1-dimensional representation.
+    axis : int
+        Axis of the **current** coordinate. The 1-dimensional array will be
+        retrieved by taking the mean over the **other** axis. E.g., for
+        getting latitude values, axis should probably be 0, since the
+        latitude axis is often the first axis.
+    fill_value : int, float, optional (default: -9999)
+        Additional fill values to set to NaN before taking the mean.
+    """
+    # if the coordinate is the first axis, we have to take the mean over
+    # the second one and vice versa
+    axis = (axis + 1) % 2
+    coord = np.ma.masked_equal(coord, fill_value)
+    coord = coord.mean(axis=axis).filled(np.nan)
+    if np.any(np.isnan(coord)):  # pragma: no cover
+        raise ReaderError("Inferred coordinate values contain NaN!")
+    return coord

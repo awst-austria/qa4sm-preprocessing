@@ -17,9 +17,6 @@ from qa4sm_preprocessing.utils import (
     preprocess_user_data,
 )
 
-from pytest import test_data_path
-
-
 def make_test_timeseries():
     # timeseries 1: daily timestamps
     index = pd.date_range("2020-01-01 12:00", "2020-12-31 12:00", freq="D")
@@ -64,11 +61,11 @@ def zip_directory(inpath, outpath):
 
 
 
-def test_csv_pipeline():
+def test_csv_pipeline(test_output_path):
     # tests the full pipeline going from pandas timeseries to CSVs to zipped
     # directory to gridded contiguous ragged dataset
     timeseries, lats, lons, metadata = make_test_timeseries()
-    csv_dir = test_data_path / "csv"
+    csv_dir = test_output_path / "csv"
     if csv_dir.exists():
         shutil.rmtree(csv_dir)
 
@@ -76,7 +73,7 @@ def test_csv_pipeline():
 
     # check if they all look okay
     for i in range(len(timeseries)):
-        fname = f"test_lat={lats[i]}_lon={lons[i]}.csv"
+        fname = f"test_gpi={i}_lat={lats[i]}_lon={lons[i]}.csv"
         ts = pd.read_csv(csv_dir / fname, index_col=0, parse_dates=True)[
             "soil_moisture"
         ]
@@ -90,7 +87,7 @@ def test_csv_pipeline():
 
     # make zip file
     # make zip file
-    zfile = test_data_path / "csv.zip"
+    zfile = test_output_path / "csv.zip"
     if zfile.exists():
         zfile.unlink()
     zip_directory(csv_dir, zfile)
@@ -103,7 +100,7 @@ def test_csv_pipeline():
     assert reader.get_metadata("soil_moisture") == metadata["soil_moisture"]
 
     # do the preprocessing with the full preprocessing function
-    outpath = test_data_path / "gridded_ts"
+    outpath = test_output_path / "gridded_ts"
     if outpath.exists():
         shutil.rmtree(outpath)
     reader = preprocess_user_data(zfile, outpath)
@@ -121,11 +118,11 @@ def test_csv_pipeline():
     )
 
 
-def test_contiguous_ragged_pipeline():
+def test_contiguous_ragged_pipeline(test_output_path):
     # tests the full pipeline going from pandas timeseries to zipped pynetcf
     # directory to gridded contiguous ragged dataset
     timeseries, lats, lons, metadata = make_test_timeseries()
-    pynetcf_dir = test_data_path / "pynetcf"
+    pynetcf_dir = test_output_path / "pynetcf"
     if pynetcf_dir.exists():
         shutil.rmtree(pynetcf_dir)
 
@@ -150,13 +147,13 @@ def test_contiguous_ragged_pipeline():
     check_reader(reader)
 
     # make zip file
-    zfile = test_data_path / "pynetcf.zip"
+    zfile = test_output_path / "pynetcf.zip"
     if zfile.exists():
         zfile.unlink()
     zip_directory(pynetcf_dir, zfile)
 
     # do the preprocessing with the full preprocessing function
-    outpath = test_data_path / "gridded_ts"
+    outpath = test_output_path / "gridded_ts"
     if outpath.exists():
         shutil.rmtree(outpath)
     reader = preprocess_user_data(zfile, outpath)
@@ -164,15 +161,15 @@ def test_contiguous_ragged_pipeline():
     check_reader(reader)
 
 
-def test_stack_pipeline(synthetic_test_args):
-    stackpath = test_data_path / "stack.nc"
+def test_stack_pipeline(synthetic_test_args, test_output_path):
+    stackpath = test_output_path / "stack.nc"
     if stackpath.exists():
         stackpath.unlink()
 
     ds, kwargs = synthetic_test_args
     ds.to_netcdf(stackpath)
 
-    reader = preprocess_user_data(stackpath, test_data_path / "stack_ts")
+    reader = preprocess_user_data(stackpath, test_output_path / "stack_ts")
     assert isinstance(reader, GriddedNcOrthoMultiTs)
 
     gpis, lons, lats, _ = reader.grid.get_grid_points()
@@ -185,24 +182,24 @@ def test_stack_pipeline(synthetic_test_args):
             assert np.all(ts == ref)
 
 
-def test_csv_pipeline_no_metadata():
+def test_csv_pipeline_no_metadata(test_output_path):
     # tests the full pipeline going from pandas timeseries to CSVs to zipped
     # directory to gridded contiguous ragged dataset
     timeseries, lats, lons, metadata = make_test_timeseries()
-    csv_dir = test_data_path / "csv"
+    csv_dir = test_output_path / "csv"
     if csv_dir.exists():
         shutil.rmtree(csv_dir)
 
     make_csv_dataset(timeseries, lats, lons, csv_dir, name="test")
 
     # make zip file
-    zfile = test_data_path / "csv.zip"
+    zfile = test_output_path / "csv.zip"
     if zfile.exists():
         zfile.unlink()
     zip_directory(csv_dir, zfile)
 
     # do the preprocessing with the full preprocessing function
-    outpath = test_data_path / "gridded_ts"
+    outpath = test_output_path / "gridded_ts"
     if outpath.exists():
         shutil.rmtree(outpath)
     reader = preprocess_user_data(zfile, outpath)

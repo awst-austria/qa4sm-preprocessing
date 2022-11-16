@@ -46,8 +46,8 @@ def make_csv_dataset(
         nloc == len(lons) == len(lats)
     ), "'timeseries', 'lons', and 'lats' must all have the same length!"
 
-    for ts, lat, lon in zip(timeseries, lats, lons):
-        write_timeseries(ts, lat, lon, name, outpath)
+    for gpi, (ts, lat, lon) in enumerate(zip(timeseries, lats, lons)):
+        write_timeseries(ts, gpi, lat, lon, name, outpath)
     if metadata is not None:
         metadatafile = Path(outpath) / "metadata.yml"
         with open(metadatafile, "w") as f:
@@ -88,6 +88,7 @@ def make_gridded_contiguous_ragged_dataset(
 
 def write_timeseries(
     ts: Union[pd.Series, pd.DataFrame],
+    gpi: int,
     lat: float,
     lon: float,
     name: str,
@@ -98,6 +99,8 @@ def write_timeseries(
     ----------
     ts : series or dataframe
         Data to write to CSV format.
+    gpi : int
+        Unique grid point index.
     lat, lon : float
         Coordinates of location.
     name : str
@@ -109,7 +112,7 @@ def write_timeseries(
     """
     directory = Path(directory)
     directory.mkdir(exist_ok=True, parents=True)
-    path = directory / f"{name}_lat={lat}_lon={lon}.csv"
+    path = directory / f"{name}_gpi={gpi}_lat={lat}_lon={lon}.csv"
     ts.to_csv(path)
 
 

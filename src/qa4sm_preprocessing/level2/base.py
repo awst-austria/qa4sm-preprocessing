@@ -94,6 +94,9 @@ class L2Reader(DirectoryImageReader):
         # override, should return a GridInfo object
         ...  # pragma: no cover
 
+    def _gridinfo_from_dataset(self, ds):
+        return self._gridinfo()
+
     @abstractmethod
     def _variable_metadata(self) -> Mapping[str, Mapping[str, str]]:
         # override, should return a dictionary of variable names mapping to
@@ -123,19 +126,7 @@ class L2Reader(DirectoryImageReader):
             fmt=fmt,
             time_regex_pattern=time_regex_pattern,
             pattern=pattern,
-            gridtype=gridinfo.gridtype,
-            lat=gridinfo.lat,
-            lon=gridinfo.lon,
-            ydim=gridinfo.ydim,
-            xdim=gridinfo.xdim,
-            locdim=gridinfo.locdim,
-            # We set construct_grid to False here, because the grid is already
-            # constructed in the call to _gridinfo(), so we don't have to
-            # reconstruct it. The superclass constructor will set
-            # self.grid = False, so we have to set it after the constructor
-            construct_grid=False,
         )
-        self.grid = self.finalize_grid(gridinfo.construct_grid())
 
     def _read_file(self, fname) -> Mapping[str, np.ndarray]:
         # overrides the DirectoryImageReader function to be more specific to L2

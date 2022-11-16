@@ -9,7 +9,6 @@ from qa4sm_preprocessing.reading import (
 )
 
 import pytest
-from pytest import test_data_path
 
 
 def test_StackTs(regular_test_dataset):
@@ -23,10 +22,10 @@ def test_StackTs(regular_test_dataset):
         assert np.all(ts == ref)
 
 
-def test_StackTs_repurpose(regular_test_dataset):
+def test_StackTs_repurpose(regular_test_dataset, test_output_path):
     reader = StackTs(regular_test_dataset, "X")
     period = (reader.data.time.values[0], reader.data.time.values[-1])
-    outpath = test_data_path / "gridded_ts"
+    outpath = test_output_path / "gridded_ts"
     tsreader = reader.repurpose(outpath, overwrite=True, start=period[0], end=period[1])
     gpis, lons, lats, _ = tsreader.grid.get_grid_points()
     for gpi, lon, lat in zip(gpis, lons, lats):
@@ -48,12 +47,12 @@ def test_StackTs_locdim(unstructured_test_dataset):
         assert np.all(ts == ref)
 
 
-def test_GriddedNcOrthoMultiTs(synthetic_test_args):
+def test_GriddedNcOrthoMultiTs(synthetic_test_args, test_output_path):
 
     ds, kwargs = synthetic_test_args
     stack = StackImageReader(ds, ["X", "Y"], **kwargs)
 
-    tspath = test_data_path / "ts_test_path"
+    tspath = test_output_path / "ts_test_path"
     tsreader = stack.repurpose(tspath, overwrite=True)
 
     gpis, lons, lats, _ = tsreader.grid.get_grid_points()
@@ -110,13 +109,13 @@ def test_StackTs_timevar(synthetic_test_args):
     assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
 
 
-def test_GriddedNcOrthoMultiTs_timeoffset(synthetic_test_args):
+def test_GriddedNcOrthoMultiTs_timeoffset(synthetic_test_args, test_output_path):
 
     ds, kwargs = synthetic_test_args
     ds["time_offset"] = xr.ones_like(ds.X)
     stack = StackImageReader(ds, **kwargs)
 
-    tspath = test_data_path / "ts_test_path"
+    tspath = test_output_path / "ts_test_path"
     # time_offset should be detected by default
     tsreader = stack.repurpose(tspath, overwrite=True)
 
@@ -125,7 +124,7 @@ def test_GriddedNcOrthoMultiTs_timeoffset(synthetic_test_args):
     assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
 
 
-def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
+def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args, test_output_path):
 
     ds, kwargs = synthetic_test_args
     newtime = xr.ones_like(ds.X)
@@ -135,7 +134,7 @@ def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
     ds["exact_time"] = newtime
     stack = StackImageReader(ds, **kwargs)
 
-    tspath = test_data_path / "ts_test_path"
+    tspath = test_output_path / "ts_test_path"
     tsreader = stack.repurpose(tspath, timevarname="exact_time", overwrite=True)
 
     df = tsreader.read(0)
@@ -143,12 +142,12 @@ def test_GriddedNcOrthoMultiTs_timevar(synthetic_test_args):
     assert np.all(df.index == (ds.indexes["time"] + pd.Timedelta("1s")))
 
 
-def test_GriddedNcOrthoMultiTs_period(synthetic_test_args):
+def test_GriddedNcOrthoMultiTs_period(synthetic_test_args, test_output_path):
 
     ds, kwargs = synthetic_test_args
     stack = StackImageReader(ds, **kwargs)
 
-    tspath = test_data_path / "ts_test_path"
+    tspath = test_output_path / "ts_test_path"
     start = "2000-01-01"
     end = "2000-01-04"
     tsreader = stack.repurpose(tspath, start=start, end=end, overwrite=True)
@@ -159,12 +158,12 @@ def test_GriddedNcOrthoMultiTs_period(synthetic_test_args):
     assert df.equals(ds.isel(**idx).to_dataframe().loc[start:end, ["X", "Y"]])
 
 
-def test_GriddedNcOrthoMultiTs(synthetic_test_args):
+def test_GriddedNcOrthoMultiTs(synthetic_test_args, test_output_path):
 
     ds, kwargs = synthetic_test_args
     stack = StackImageReader(ds, ["X", "Y"], **kwargs)
 
-    tspath = test_data_path / "ts_test_path"
+    tspath = test_output_path / "ts_test_path"
     tsreader = stack.repurpose(tspath, overwrite=True)
 
     gpis, lons, lats, _ = tsreader.grid.get_grid_points()
@@ -245,7 +244,7 @@ def test_GriddedNcOrthoMultiTs(synthetic_test_args):
 
 #     # testing with a small cellsize here to have different output files
 #     ragged_tsreader = ContiguousRaggedTs(cont_ragged_ts, cellsize=1)
-#     tspath = test_data_path / "ts_test_path"
+#     tspath = test_output_path / "ts_test_path"
 #     gridded_tsreader = ragged_tsreader.repurpose(tspath, overwrite=True)
 
 #     assert isinstance(ragged_tsreader, ContiguousRaggedTs)

@@ -5,6 +5,8 @@ from qa4sm_preprocessing.reading import (
     StackImageReader,
 )
 
+from qa4sm_preprocessing.reading.base import _1d_coord_from_2d
+
 from .utils import validate_reader
 
 
@@ -63,7 +65,15 @@ def test_2d_to_1d(curvilinear_test_dataset):
     # this tests if we can infer the 1D coordinate arrays from 2D arrays if
     # the 2D arrays are tensor products of the 1D products
     ds = curvilinear_test_dataset
-    reader = StackImageReader(ds, gridtype="regular")
+    lat = _1d_coord_from_2d(ds.lat.values, 0)
+    lon = _1d_coord_from_2d(ds.lon.values, 1)
+    ds_1d = (ds.copy()
+         .assign_coords({"y": lat, "x": lon})
+         .drop(["lat", "lon"])
+         .rename({"y": "lat", "x": "lon"})
+     )
+
+    reader = StackImageReader(ds_1d)
 
     dims = dict(ds.dims)
     lat = np.linspace(0, 1, dims["y"])

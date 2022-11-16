@@ -106,6 +106,16 @@ class ImageReaderBase(ReaderBase):
             for v in self.varnames
         }
 
+    def _fix_ndim(self, arr: np.ndarray) -> np.ndarray:
+        if arr.ndim == self.imgndim:
+            # we need to add a time axis
+            arr = arr[np.newaxis, ...]
+        elif arr.ndim >= self.imgndim + 2:  # pragma: no cover
+            raise ReaderError(
+                f"Data with shape {arr.shape} has wrong number of dimensions"
+            )
+        return arr
+
     def get_coords_dims(self, times):
         coords = {}
         coords[self.timename] = times

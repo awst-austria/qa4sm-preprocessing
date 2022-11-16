@@ -159,5 +159,5 @@ class StackImageReader(ImageReaderBase):
         self, start: datetime.datetime, end: datetime.datetime
     ) -> xr.Dataset:
         block = self.data.sel({self.timename: slice(start, end)})
-        block_dict = {var: block[var].data for var in self.varnames}
+        block_dict = {v: self._fix_ndim(block[v].data) for v in self.varnames}
         return block_dict

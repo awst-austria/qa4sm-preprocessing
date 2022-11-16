@@ -32,7 +32,7 @@ The main routines that should be modified when subclassing are:
 
 * ``_open_dataset``: basic routine for reading data from a file and returning
   it as xr.Dataset
-* ``_latlon_from_dataset``: For manual adaption of how the grid is generated if
+* ``_gridinfo_from_dataset``: For manual adaption of how the grid is generated if
   it cannot be inferred directly from the file.
 * ``_metadata_from_dataset``: If metadata cannot be read from the files.
 * ``_tstamps_in_file``: If the timestamp cannot be inferred from the filename
@@ -132,6 +132,9 @@ quality flags, and the latitude and longitude are only provided as 2D arrays
 with fill values (-9999) at non-land locations (but the grid is a regular
 grid). A reader could look like this::
 
+    from qa4sm_preprocessing.reading.base import GridInfo, _1d_coord_from_2d
+
+
     class SmapSMReader(DirectoryImageReader):
 
         def __init__(self, directory):
@@ -171,16 +174,17 @@ grid). A reader could look like this::
             sm = np.ma.masked_where(~valid, sm).filled(np.nan)
             return sm[np.newaxis, ...]
 
-        def _latlon_from_dataset(self, fname):
+        def _gridinfo_from_dataset(self, fname):
             # This method is called from the constructor of base.ReaderBase and
             # should return latitude and longitude as xr.DataArrays
             with h5py.File(fname, "r") as f:
                 g = f["Soil_Moisture_Retrieval_Data_AM"]
-                # _1d_coord_from_2d is a function defined in base.ReaderBase
                 # reduces the 2D tensor product coordinates to 1D coordinates
-                lat = self._1d_coord_from_2d(g["latitude"], 0, fill_value=-9999)
-                lon = self._1d_coord_from_2d(g["longitude"], 1, fill_value=-9999)
-            return lat, lon
+                lat = _1d_coord_from_2d(g["latitude"], 0, fill_value=-9999)
+                lon = _1d_coord_from_2d(g["longitude"], 1, fill_value=-9999)
+            # since we now have 1D coordinates for a 2D array, the grid is regular
+            gridinfo = GridInfo(lat, lon, "regular")
+            return gridinfo
 
         def _metadata_from_dataset(self, fname):
             array_attrs =  {"SMAP_L3_SM": {"long_name": "soil moisture",
@@ -206,7 +210,7 @@ grid). A reader could look like this::
                 }
             }
 
-In this example we also adapted ``_latlon_from_dataset``,
+In this example we also adapted ``_gridinfo_from_dataset``,
 ``_metadata_from_dataset``, and ``_dtype_from_dataset``. Instead, we could have
 just read the latitude and longitude in ``_open_dataset`` and added them as
 coordinates to the ``xr.Dataset``, but this way we don't have to read the
@@ -529,7 +533,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         # can be overriden for custom datasets
         return xr.load_dataset(fname, **self.open_dataset_kwargs)
 
-    def _latlon_from_dataset(
+    def _gridinfo_from_dataset(
         self, fname: Union[Path, str]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Generates lat/lon arrays from a file"""
@@ -540,7 +544,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             # Not tested because _open_dataset(fname) is tested and this is not
             # a typical use case.
             ds = self._open_nice_dataset(fname)
-        return super()._latlon_from_dataset(ds)
+        return super()._gridinfo_from_dataset(ds)
 
     def _metadata_from_dataset(
         self, fname: Union[Path, str]
@@ -568,11 +572,17 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
 
     def _dtype_from_dataset(self, fname: Union[Path, str]) -> Mapping:
         if fname == self._example_file:
-            # we need to use a copy here, because we modify the dataset
             ds = self.example_dataset
         else:  # pragma: no cover
             ds = self._open_nice_dataset(fname)
         return super()._dtype_from_dataset(ds)
+
+    def _shape_from_dataset(self, fname: Union[Path, str]) -> Mapping:
+        if fname == self._example_file:
+            ds = self.example_dataset
+        else:  # pragma: no cover
+            ds = self._open_nice_dataset(fname)
+        return super()._shape_from_dataset(ds)
 
     def _tstamps_in_file(
         self,
@@ -631,17 +641,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         # this function reads a xr.Dataset and converts it to the dictionary
         # format that is used internally
         ds = self._open_nice_dataset(fname)
-        data = {}
-        for v in self.varnames:
-            arr = ds[v].data
-            if arr.ndim == self.imgndim:
-                # we need to add a time axis
-                arr = arr[np.newaxis, ...]
-            elif arr.ndim >= self.imgndim + 2:  # pragma: no cover
-                raise ReaderError(
-                    f"Data with shape {arr.shape} has wrong number of dimensions"
-                )
-            data[v] = arr
+        data = {v: self._fix_ndim(ds[v].data) for v in self.varnames}
         return data
 
     def _make_nicer_ds(self, ds: xr.Dataset) -> xr.Dataset:

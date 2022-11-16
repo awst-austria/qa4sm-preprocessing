@@ -89,10 +89,14 @@ def test_csv_pipeline():
         assert metadata[var] == mdata[var]
 
     # make zip file
-    zip_directory(csv_dir, test_data_path / "csv.zip")
+    # make zip file
+    zfile = test_data_path / "csv.zip"
+    if zfile.exists():
+        zfile.unlink()
+    zip_directory(csv_dir, zfile)
 
     # try to read with ZippedCsvTs
-    reader = ZippedCsvTs(test_data_path / "csv.zip")
+    reader = ZippedCsvTs(zfile)
     for i in range(len(timeseries)):
         ts = reader.read(i)["soil_moisture"]
         pd.testing.assert_series_equal(ts, timeseries[i], check_freq=False)
@@ -102,7 +106,7 @@ def test_csv_pipeline():
     outpath = test_data_path / "gridded_ts"
     if outpath.exists():
         shutil.rmtree(outpath)
-    reader = preprocess_user_data(test_data_path / "csv.zip", outpath)
+    reader = preprocess_user_data(zfile, outpath)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     for i in range(len(timeseries)):
@@ -146,13 +150,16 @@ def test_contiguous_ragged_pipeline():
     check_reader(reader)
 
     # make zip file
-    zip_directory(pynetcf_dir, test_data_path / "pynetcf.zip")
+    zfile = test_data_path / "pynetcf.zip"
+    if zfile.exists():
+        zfile.unlink()
+    zip_directory(pynetcf_dir, zfile)
 
     # do the preprocessing with the full preprocessing function
     outpath = test_data_path / "gridded_ts"
     if outpath.exists():
         shutil.rmtree(outpath)
-    reader = preprocess_user_data(test_data_path / "pynetcf.zip", outpath)
+    reader = preprocess_user_data(zfile, outpath)
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     check_reader(reader)
 
@@ -189,15 +196,19 @@ def test_csv_pipeline_no_metadata():
     make_csv_dataset(timeseries, lats, lons, csv_dir, name="test")
 
     # make zip file
-    zip_directory(csv_dir, test_data_path / "csv.zip")
+    zfile = test_data_path / "csv.zip"
+    if zfile.exists():
+        zfile.unlink()
+    zip_directory(csv_dir, zfile)
 
     # do the preprocessing with the full preprocessing function
     outpath = test_data_path / "gridded_ts"
     if outpath.exists():
         shutil.rmtree(outpath)
-    reader = preprocess_user_data(test_data_path / "csv.zip", outpath)
+    reader = preprocess_user_data(zfile, outpath)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     for i in range(len(timeseries)):
+        print(i)
         ts = reader.read(i)["soil_moisture"]
         pd.testing.assert_series_equal(ts, timeseries[i], check_freq=False)

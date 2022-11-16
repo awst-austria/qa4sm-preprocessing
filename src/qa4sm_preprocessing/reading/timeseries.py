@@ -470,7 +470,7 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
         df = data.to_pandas()[self.varnames]
         df = self._modify_time(df)
         if period is not None:
-            df = df[period[0] : period[1]]
+            df = df.loc[period[0] : period[1]]
         return df
 
     def _get_time_unit(self):
@@ -537,7 +537,7 @@ class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin
 
         df = pd.DataFrame(values, index=time, columns=self.parameters)
         if period is not None:
-            df = df[period[0] : period[1]]
+            df = df.loc[period[0] : period[1]]
         return df
 
     @property

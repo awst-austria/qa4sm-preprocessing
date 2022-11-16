@@ -637,7 +637,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             if arr.ndim == self.imgndim:
                 # we need to add a time axis
                 arr = arr[np.newaxis, ...]
-            elif arr.ndim >= self.imgndim + 2:
+            elif arr.ndim >= self.imgndim + 2:  # pragma: no cover
                 raise ReaderError(
                     f"Data with shape {arr.shape} has wrong number of dimensions"
                 )
@@ -784,6 +784,10 @@ class _BlockDataReader:
         return self.directoryreader.use_dask
 
     @property
+    def dtype(self):
+        return self.directoryreader.dtype
+
+    @property
     def use_tqdm(self):
         # using tqdm for a progressbar only makes sense if we do not use dask
         # otherwise it's better to use dask's diagnostic tools
@@ -824,7 +828,7 @@ class _BlockDataReader:
             )
             blockdict = {
                 v: dask.array.from_delayed(
-                    delayed_blockdict[v], shape=shape, chunks=shape, dtype=self.dtype[v]
+                    delayed_blockdict[v], shape=shape, dtype=self.dtype[v]
                 )
                 for v in self.varnames
             }
@@ -845,61 +849,6 @@ class _BlockDataReader:
             ids = [tstamps_in_file.index(ts) for ts in timestamps]
             data = {v: data[v][ids, ...] for v in data}
         return data
-
-        block_dict = {}
-        for varname in self.varnames:
-            arr = ds[varname]
-            if self.timename in arr.dims:
-                # if there are multiple timestamps in each file, reading is
-                # a bit more complicated. In the easiest case, we have as
-                # many timestamps as there are in the file, and we can just
-                # return it.
-                # Otherwise, if time is a coordinate, we can use
-                # .sel(tstamps). If this is also not the case, we need to
-                # find the indices of tstamps in the file
-                if len(tstamps) != len(arr[self.timename]):
-                    if self.timename in arr.coords:
-                        arr = arr.sel({self.timename: tstamps})
-                    else:
-                        all_tstamps = self._file_tstamp_map[fname]
-                        ids = [all_tstamps.index(ts) for ts in tstamps]
-                        arr = arr.isel({self.timename: ids})
-                block_dict[varname] = arr.data
-            else:
-                block_dict[varname] = arr.data[np.newaxis, ...]
-        return block_dict
-
-        return data
-
-    def _read_single_file(self, fname, tstamps) -> dict:
-        """
-        Reads a single file and returns a dictionary mapping variable names to
-        numpy arrays. Can be overriden in case it's easier to provide this
-        format than xarray datasets.
-        """
-        ds = self._open_nice_dataset(fname)
-        block_dict = {}
-        for varname in self.varnames:
-            arr = ds[varname]
-            if self.timename in arr.dims:
-                # if there are multiple timestamps in each file, reading is
-                # a bit more complicated. In the easiest case, we have as
-                # many timestamps as there are in the file, and we can just
-                # return it.
-                # Otherwise, if time is a coordinate, we can use
-                # .sel(tstamps). If this is also not the case, we need to
-                # find the indices of tstamps in the file
-                if len(tstamps) != len(arr[self.timename]):
-                    if self.timename in arr.coords:
-                        arr = arr.sel({self.timename: tstamps})
-                    else:
-                        all_tstamps = self._file_tstamp_map[fname]
-                        ids = [all_tstamps.index(ts) for ts in tstamps]
-                        arr = arr.isel({self.timename: ids})
-                block_dict[varname] = arr.data
-            else:
-                block_dict[varname] = arr.data[np.newaxis, ...]
-        return block_dict
 
     def _assemble_blockdict(
         self, blockdict: Mapping[str, Sequence[Union[np.ndarray, da.core.Array]]]

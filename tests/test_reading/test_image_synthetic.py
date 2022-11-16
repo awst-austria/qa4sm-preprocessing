@@ -55,7 +55,6 @@ def make_clean_testdir():
         shutil.rmtree(path)
 
 
-
 def test_directory_image_reader_basic(synthetic_test_args):
     ds, kwargs = synthetic_test_args
     make_clean_testdir()
@@ -64,6 +63,21 @@ def test_directory_image_reader_basic(synthetic_test_args):
         test_data_path / "synthetic",
         ["X", "Y"],
         fmt="synthetic_%Y%m%dT%H%M.nc",
+        **kwargs
+    )
+    validate_reader(reader, ds)
+    make_clean_testdir()
+
+
+def test_directory_image_reader_use_dask(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    make_clean_testdir()
+    write_images(ds, test_data_path / "synthetic", "synthetic")
+    reader = DirectoryImageReader(
+        test_data_path / "synthetic",
+        ["X", "Y"],
+        fmt="synthetic_%Y%m%dT%H%M.nc",
+        use_dask=True,
         **kwargs
     )
     validate_reader(reader, ds)

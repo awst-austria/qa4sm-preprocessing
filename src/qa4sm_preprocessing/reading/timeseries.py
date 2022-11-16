@@ -5,11 +5,14 @@ import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
+import re
 import shutil
 from tqdm.auto import tqdm
-from typing import Union, Iterable, Sequence
+from typing import Union, Iterable, Sequence, Mapping
 import warnings
 import xarray as xr
+import yaml
+from zipfile import ZipFile
 
 from pygeogrids.grids import BasicGrid
 from pygeogrids.netcdf import load_grid, save_grid
@@ -110,7 +113,12 @@ class _TimeseriesRepurposeMixin:
             outpath.mkdir(exist_ok=True, parents=True)
 
             io = ioclass(outpath, self.grid, mode="w")
-            attrs = {v: dict(self.data[v].attrs) for v in self.varnames}
+            attrs = {}
+            for v in self.varnames:
+                try:
+                    attrs[v] = self.get_metadata(v)
+                except KeyError:  # pragma: no cover
+                    attrs[v] = {}
             # loop over cells and the write each cell separately
             for cell in tqdm(self.grid.get_cells()):
                 cell_gpis, cell_lons, cell_lats = self.grid.grid_points_for_cell(cell)
@@ -118,10 +126,13 @@ class _TimeseriesRepurposeMixin:
                     ts = self.read(gpi, period=period)
                     io._write_gp(gpi, ts, attributes=attrs)
             save_grid(outpath / "grid.nc", self.grid)
-        else:
+        else:  # pragma: no cover
             logging.info(f"Output path already exists: {str(outpath)}")
         io = ioclass(str(outpath), self.grid, **ioclass_kwargs, mode="r")
         return io
+
+    def get_metadata(self, varname: str) -> Mapping:
+        return dict(self.data[varname].attrs)
 
 
 class _EasierGriddedNcMixin:
@@ -481,61 +492,135 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
         return GriddedNcOrthoMultiTs
 
 
-class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
-    """
-    Reader for contiguous ragged timeseries arrays for QA4SM.
+# class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+#     """
+#     Reader for contiguous ragged timeseries arrays for QA4SM.
 
-    This is just an adaptation of the pynetcdf GriddedNcContiguousRaggedTs
-    class, and is not associated with the pynetcf ``ContiguousRaggedTs``.
+#     This is just an adaptation of the pynetcdf GriddedNcContiguousRaggedTs
+#     class, and is not associated with the pynetcf ``ContiguousRaggedTs``.
+#     """
+
+#     def __init__(
+#         self,
+#         ds: Union[xr.Dataset, Path, str],
+#         varnames: Union[str, Sequence] = None,
+#         cellsize=None,
+#         latname="lat",
+#         lonname="lon",
+#         timename="time",
+#         countname="count",
+#         cumulative_countname="cumulative_count",
+#     ):
+#         if isinstance(ds, (Path, str)):  # pragma: no cover
+#             ds = xr.open_dataset(ds)
+#         if varnames is None:
+#             varnames = list(
+#                 set(ds.data_vars)
+#                 - set([latname, lonname, timename, countname, cumulative_countname])
+#             )
+#         elif isinstance(varnames, str):  # pragma: no cover
+#             varnames = [varnames]
+#         self.varnames = list(varnames)
+
+#         # infer the grid
+#         lat = ds[latname].values
+#         lon = ds[lonname].values
+#         grid = BasicGrid(lon, lat)
+#         if cellsize is None:  # pragma: no cover
+#             cellsize = infer_cellsize(grid)
+#         cellgrid = grid.to_cell_grid(cellsize=cellsize)
+#         super().__init__(None, cellgrid, parameters=varnames)
+
+#         self.timename = timename
+#         self.locname = "loc"
+#         self.data = ds
+
+#     def _read_gp(self, gpi, period=None, **kwargs) -> pd.DataFrame:
+
+#         # the main challenge is to find the start and end index of the values
+#         # and the times, this is done via the cumulative count and the count
+#         # variable
+#         end = int(self.data["cumulative_count"][gpi])
+#         start = end - int(self.data["count"][gpi])
+
+#         time = self.data[self.timename][start:end]
+#         values = np.array([self.data[p][start:end].values for p in self.parameters]).T
+
+#         df = pd.DataFrame(values, index=time, columns=self.parameters)
+#         if period is not None:
+#             df = df.loc[period[0] : period[1]]
+#         return df
+
+#     @property
+#     def _ioclass(self):
+#         return GriddedNcContiguousRaggedTs
+
+
+class ZippedCsvTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+    """
+    Reader for zipped directory of CSV files in QA4SM format.
+
+    Parameters
+    ----------
+    inputpath : path
+        Path to the zip file.
+    varnames : str
+        Names of the variable that should be read.
+    cellsize : float, optional (default: None)
+        Size of cells for cell grid. If None, a heuristic will be used to
+        estimate the size.
     """
 
     def __init__(
         self,
-        ds: Union[xr.Dataset, Path, str],
+        inputpath: Union[Path, str],
         varnames: Union[str, Sequence] = None,
         cellsize=None,
-        latname="lat",
-        lonname="lon",
-        timename="time",
-        countname="count",
-        cumulative_countname="cumulative_count",
     ):
-        if isinstance(ds, (Path, str)):  # pragma: no cover
-            ds = xr.open_dataset(ds)
-        if varnames is None:
-            varnames = list(
-                set(ds.data_vars)
-                - set([latname, lonname, timename, countname, cumulative_countname])
-            )
-        elif isinstance(varnames, str):  # pragma: no cover
-            varnames = [varnames]
-        self.varnames = list(varnames)
+        self.zfile = ZipFile(inputpath)
 
-        # infer the grid
-        lat = ds[latname].values
-        lon = ds[lonname].values
-        grid = BasicGrid(lon, lat)
+        # get coordinates
+        namelist = self.zfile.namelist()
+        self.fnames = list(filter(lambda s: s.endswith(".csv"), namelist))
+        lats = np.empty(len(self.fnames))
+        lons = np.empty(len(self.fnames))
+        for i, name in enumerate(self.fnames):
+            lats[i] = float(re.findall(r".*lat=([0-9.]+).*\.csv", name)[0])
+            lons[i] = float(re.findall(r".*lon=([0-9.]+).*\.csv", name)[0])
+
+        # create grid object
+        grid = BasicGrid(lons, lats)
         if cellsize is None:  # pragma: no cover
             cellsize = infer_cellsize(grid)
         cellgrid = grid.to_cell_grid(cellsize=cellsize)
+
+        if varnames is None:
+            # open first dataset to get the variable names
+            df = self._read_file(self.fnames[0])
+            varnames = df.columns
+        elif isinstance(varnames, str):  # pragma: no cover
+            varnames = [varnames]
+        self.varnames = varnames
+
+        metadata = list(filter(lambda s: s.endswith("metadata.yml"), namelist))
+        if metadata:
+            with self.zfile.open(metadata[0], "r") as f:
+                metadata = yaml.load(f, Loader=yaml.SafeLoader)
+        else:
+            metadata = {v: {} for v in self.varnames}
+        self.metadata = metadata
+
+        # call super constructor (_GriddedNcContiguousRaggedTs)
         super().__init__(None, cellgrid, parameters=varnames)
 
-        self.timename = timename
-        self.locname = "loc"
-        self.data = ds
+    def _read_file(self, fname) -> pd.DataFrame:
+        with self.zfile.open(fname) as f:
+            df = pd.read_csv(f, index_col=0, parse_dates=True)
+        return df
 
     def _read_gp(self, gpi, period=None, **kwargs) -> pd.DataFrame:
-
-        # the main challenge is to find the start and end index of the values
-        # and the times, this is done via the cumulative count and the count
-        # variable
-        end = int(self.data["cumulative_count"][gpi])
-        start = end - int(self.data["count"][gpi])
-
-        time = self.data[self.timename][start:end]
-        values = np.array([self.data[p][start:end].values for p in self.parameters]).T
-
-        df = pd.DataFrame(values, index=time, columns=self.parameters)
+        fname = self.fnames[gpi]
+        df = self._read_file(fname)[self.varnames]
         if period is not None:
             df = df.loc[period[0] : period[1]]
         return df
@@ -544,29 +629,79 @@ class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin
     def _ioclass(self):
         return GriddedNcContiguousRaggedTs
 
+    def get_metadata(self, varname: str) -> Mapping:
+        return self.metadata[varname]
 
-def make_contiguous_ragged_array(
-    timeseries: Sequence,
-    lons: Union[Sequence, np.ndarray],
-    lats: Union[Sequence, np.ndarray],
-    name: str = "soil_moisture",
-):
 
-    nloc = len(timeseries)
-    assert (
-        nloc == len(lons) == len(lats)
-    ), "'timeseries', 'lons', and 'lats' must all have the same length!"
+class TimeseriesListTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+    """
+    Reader for list of timeseries
 
-    ragged_ds = xr.Dataset()
-    ragged_ds["lon"] = ("loc", lons)
-    ragged_ds["lat"] = ("loc", lats)
+    Parameters
+    ----------
+    timeseries : list of pd.Series/pd.DataFrame
+        List of the time series to use
+    lat, lon : array-like
+        Coordinates of time series.
+    varnames : str
+        Names of the variable that should be read.
+    metadata : dict of dicts
+        Dictionary mapping variable names in the dataset to metadata
+        dictionaries, e.g. `{"sm1": {"long_name": "soil moisture 1", "units":
+        "m^3/m^3"}, "sm2": {"long_name": "soil moisture 2", "units":
+        "m^3/m^3"}}`.
+    cellsize : float, optional (default: None)
+        Size of cells for cell grid. If None, a heuristic will be used to
+        estimate the size.
+    """
 
-    times = np.concatenate([ts.index.values for ts in timeseries])
-    values = np.concatenate([ts.values for ts in timeseries])
-    count = np.array([len(ts) for ts in timeseries])
+    def __init__(
+        self,
+        timeseries: Sequence[Union[pd.Series, pd.DataFrame]],
+        lat: Union[Sequence, np.ndarray],
+        lon: Union[Sequence, np.ndarray],
+        varnames: Union[str, Sequence] = None,
+        metadata: Mapping[str, Mapping[str, str]] = None,
+        cellsize=None,
+    ):
 
-    ragged_ds["time"] = ("loctime", times)
-    ragged_ds[name] = ("loctime", values)
-    ragged_ds["count"] = ("loc", count)
-    ragged_ds["cumulative_count"] = ("loc", np.cumsum(count))
-    return ragged_ds
+        # create grid object
+        grid = BasicGrid(lon, lat)
+        if cellsize is None:  # pragma: no cover
+            cellsize = infer_cellsize(grid)
+        cellgrid = grid.to_cell_grid(cellsize=cellsize)
+
+        self.timeseries = timeseries
+
+        if varnames is None:
+            # open first dataset to get the variable names
+            ts = self.timeseries[0]
+            if isinstance(ts, pd.DataFrame):
+                varnames = ts.columns
+            elif ts.name is None:
+                varnames = [0]
+            else:
+                varnames = [ts.name]
+        elif isinstance(varnames, str):  # pragma: no cover
+            varnames = [varnames]
+        self.varnames = varnames
+
+        if metadata is None:
+            metadata = {v: {} for v in self.varnames}
+        self.metadata = metadata
+
+        # call super constructor (_GriddedNcContiguousRaggedTs)
+        super().__init__(None, cellgrid, parameters=varnames)
+
+    def _read_gp(self, gpi, period=None, **kwargs) -> pd.DataFrame:
+        df = pd.DataFrame(self.timeseries[gpi])[self.varnames]
+        if period is not None:
+            df = df.loc[period[0] : period[1]]
+        return df
+
+    @property
+    def _ioclass(self):
+        return GriddedNcContiguousRaggedTs
+
+    def get_metadata(self, varname: str) -> Mapping:
+        return self.metadata[varname]

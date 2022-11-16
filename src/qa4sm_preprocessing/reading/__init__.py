@@ -4,6 +4,5 @@ from .timeseries import (
     StackTs,
     GriddedNcOrthoMultiTs,
     GriddedNcContiguousRaggedTs,
-    ContiguousRaggedTs,
 )
 from .transpose import write_transposed_dataset

@@ -101,7 +101,8 @@ class _TimeseriesRepurposeMixin:
         outpath = Path(outpath)
         if start is not None or end is not None:
             assert start is not None and end is not None, (
-                "If 'start' or 'end' is given, the other one also" " needs to be set."
+                "If 'start' or 'end' is given, the other one also"
+                " needs to be set."
             )
             period = (start, end)
         else:
@@ -109,7 +110,9 @@ class _TimeseriesRepurposeMixin:
         if (outpath / "grid.nc").exists() and overwrite:  # pragma: no branch
             shutil.rmtree(outpath)
         ioclass = self._ioclass
-        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
+        if not (
+            outpath / "grid.nc"
+        ).exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
 
             io = ioclass(outpath, self.grid, mode="w")
@@ -121,7 +124,11 @@ class _TimeseriesRepurposeMixin:
                     attrs[v] = {}
             # loop over cells and the write each cell separately
             for cell in tqdm(self.grid.get_cells()):
-                cell_gpis, cell_lons, cell_lats = self.grid.grid_points_for_cell(cell)
+                (
+                    cell_gpis,
+                    cell_lons,
+                    cell_lats,
+                ) = self.grid.grid_points_for_cell(cell)
                 for gpi in cell_gpis:
                     ts = self.read(gpi, period=period)
                     io._write_gp(gpi, ts, attributes=attrs)
@@ -154,7 +161,10 @@ class _EasierGriddedNcMixin:
         if read_bulk is None:
             read_bulk = ioclass_kws.get("read_bulk", True)
         else:
-            if "read_bulk" in ioclass_kws and read_bulk != ioclass_kws["read_bulk"]:
+            if (
+                "read_bulk" in ioclass_kws
+                and read_bulk != ioclass_kws["read_bulk"]
+            ):
                 warnings.warn(
                     f"read_bulk={read_bulk} but ioclass_kws['read_bulk']="
                     f" {ioclass_kws['read_bulk']}. The first takes precedence."
@@ -247,7 +257,9 @@ class GriddedNcOrthoMultiTs(
             return None
 
 
-class GriddedNcContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _EasierGriddedNcMixin):
+class GriddedNcContiguousRaggedTs(
+    _GriddedNcContiguousRaggedTs, _EasierGriddedNcMixin
+):
     def __init__(
         self,
         ts_path,
@@ -410,7 +422,9 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
     ):
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
-        varnames = self._maybe_add_varnames(varnames, [timevarname, timeoffsetvarname])
+        varnames = self._maybe_add_varnames(
+            varnames, [timevarname, timeoffsetvarname]
+        )
 
         super().__init__(
             ds,
@@ -468,7 +482,9 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
             if self.gridtype == "unstructured":
                 gpi = self.grid.find_nearest_gpi(lon, lat)[0]
                 if not isinstance(gpi, np.integer):  # pragma: no cover
-                    raise ValueError(f"No gpi near (lon={lon}, lat={lat}) found")
+                    raise ValueError(
+                        f"No gpi near (lon={lon}, lat={lat}) found"
+                    )
         else:  # pragma: no cover
             raise ValueError(
                 f"args must have length 1 or 2, but has length {len(args)}"
@@ -492,7 +508,8 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
         return GriddedNcOrthoMultiTs
 
 
-# class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+# class ContiguousRaggedTs(_GriddedNcContiguousRaggedTs,
+# _TimeseriesRepurposeMixin):
 #     """
 #     Reader for contiguous ragged timeseries arrays for QA4SM.
 
@@ -516,7 +533,8 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
 #         if varnames is None:
 #             varnames = list(
 #                 set(ds.data_vars)
-#                 - set([latname, lonname, timename, countname, cumulative_countname])
+#                 - set([latname, lonname, timename, countname,
+#                 - cumulative_countname])
 #             )
 #         elif isinstance(varnames, str):  # pragma: no cover
 #             varnames = [varnames]
@@ -544,7 +562,8 @@ class StackTs(ReaderBase, _TimeModificationMixin, _TimeseriesRepurposeMixin):
 #         start = end - int(self.data["count"][gpi])
 
 #         time = self.data[self.timename][start:end]
-#         values = np.array([self.data[p][start:end].values for p in self.parameters]).T
+#         values = np.array([self.data[p][start:end].values for p in
+#         self.parameters]).T
 
 #         df = pd.DataFrame(values, index=time, columns=self.parameters)
 #         if period is not None:
@@ -639,7 +658,9 @@ class ZippedCsvTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
         return self.metadata[varname]
 
 
-class TimeseriesListTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
+class TimeseriesListTs(
+    _GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin
+):
     """
     Reader for list of timeseries
 

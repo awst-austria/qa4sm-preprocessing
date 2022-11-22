@@ -101,10 +101,7 @@ class ImageReaderBase(ReaderBase):
 
     def _empty_blockdict(self, ntime):
         shape = self.get_blockshape(ntime)
-        return {
-            v: np.empty(shape, dtype=self.dtype[v])
-            for v in self.varnames
-        }
+        return {v: np.empty(shape, dtype=self.dtype[v]) for v in self.varnames}
 
     def _fix_ndim(self, arr: np.ndarray) -> np.ndarray:
         if arr.ndim == self.imgndim:
@@ -137,7 +134,9 @@ class ImageReaderBase(ReaderBase):
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
-    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:  # pragma: no cover
+    ) -> Dict[
+        str, Union[np.ndarray, dask.array.core.Array]
+    ]:  # pragma: no cover
         """
         Reads multiple images of a dataset as a numpy/dask array.
 
@@ -225,7 +224,8 @@ class ImageReaderBase(ReaderBase):
         # differently depending on how the original data is structured:
         coords, dims = self.get_coords_dims(times)
         arrays = {
-            name: (dims, data, array_attrs[name]) for name, data in block_dict.items()
+            name: (dims, data, array_attrs[name])
+            for name, data in block_dict.items()
         }
         block = xr.Dataset(arrays, coords=coords, attrs=self.global_attrs)
 
@@ -254,7 +254,9 @@ class ImageReaderBase(ReaderBase):
             )
         return block
 
-    def read(self, timestamp: Union[datetime.datetime, str], **kwargs) -> Image:
+    def read(
+        self, timestamp: Union[datetime.datetime, str], **kwargs
+    ) -> Image:
         """
         Read a single image at a given timestamp. Raises `ReaderError` if
         timestamp is not available in the dataset.
@@ -278,11 +280,13 @@ class ImageReaderBase(ReaderBase):
             timestamp = mkdate(timestamp)
 
         if timestamp not in self.timestamps:  # pragma: no cover
-            raise ReaderError(f"Timestamp {timestamp} is not available in the dataset!")
+            raise ReaderError(
+                f"Timestamp {timestamp} is not available in the dataset!"
+            )
 
-        img = self.read_block(timestamp, timestamp, _apply_landmask_bbox=False).isel(
-            {self.timename: 0}
-        )
+        img = self.read_block(
+            timestamp, timestamp, _apply_landmask_bbox=False
+        ).isel({self.timename: 0})
         img = self._stack(img)
         data = {}
         for varname in self.varnames:
@@ -291,7 +295,9 @@ class ImageReaderBase(ReaderBase):
                 data[varname] = var
             else:
                 data[varname] = var[self.grid.activegpis]
-        metadata = {varname: img[varname].attrs.copy() for varname in self.varnames}
+        metadata = {
+            varname: img[varname].attrs.copy() for varname in self.varnames
+        }
         img = Image(
             self.grid.arrlon,
             self.grid.arrlat,
@@ -344,7 +350,9 @@ class ImageReaderBase(ReaderBase):
         start, end = self._validate_start_end(start, end)
         if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
-        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
+        if not (
+            outpath / "grid.nc"
+        ).exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
             array_attrs = {v: testimg[v].attrs.copy() for v in self.varnames}
@@ -370,6 +378,6 @@ class ImageReaderBase(ReaderBase):
                 self.use_tqdm = orig_tqdm
         else:
             logging.info(f"Output path already exists: {str(outpath)}")
-                
+
         reader = GriddedNcOrthoMultiTs(str(outpath), **reader_kwargs)
         return reader

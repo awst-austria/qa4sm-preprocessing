@@ -152,25 +152,10 @@ def _transpose(
     dims[reader.timename] = len(timestamps)
     new_dimsizes = tuple(size for size in dims.values())
 
-    # Now we have to find out how big the chunks should be. For this, we first
-    # have to calculate the image size for the variable with the largest dtype,
-    # because this will limit the size
+    # calculate chunk sizes if they are not given
     maxdtypesize = 0
-    maxstepsize = 0
     for var in reader.varnames:
         maxdtypesize = max(maxdtypesize, testds[var].dtype.itemsize)
-        # The available memory governs how many images we can read at once:
-        # mem = imagesize * nvar * 3 * nsteps
-        # The factor 3 is because we have to read the data and transpose it,
-        # just to be safe we use a bit less memory than allowed.
-        maxstepsize = nimages_for_memory(testds[var], memory) // 3
-    if stepsize is None:
-        stepsize = min(maxstepsize, len(reader.timestamps))
-    else:
-        stepsize = min(stepsize, maxstepsize, len(reader.timestamps))
-    logging.info(f"write_transposed_dataset: Using {stepsize} images per step")
-
-    # calculate chunk sizes if they are not given
     if chunks is None:
         if outfname.endswith(".zarr"):
             chunksizes = infer_chunksizes(new_dimsizes, 100, maxdtypesize)
@@ -189,39 +174,63 @@ def _transpose(
         chunksizes = list(chunks.values())[:-1] + [len(timestamps)]
     logging.info(f"Chunking to: {chunks}")
 
-    # We make the intermediate size of the "chunk base" (i.e. chunk dimension
-    # without time direction) a bit bigger than the final ones, so we have less
-    # chunks to read and therefore less overhead (can be signifcant).
-    # For this, we adapt the chunk sizes of the first dimension to be the
-    # largest possible that still meets the two conditions:
-    # - chunks shouldn't be larger than 100MB
-    # - chunks should only be so large that 2 chunks of full timeseries length
-    #   fit into memory
-    # Let n1 be the chunk size of the first dimension, 'no' be the product of
-    # the chunksizes except the first and last (time), nt the number of
-    # timesteps, and ns the stepsize, and s the dtypesize. Then we have:
-    # - n1a * no * ns <= 100MB / s <=> n1a = 100MB / (s * no * ns)
-    # - n1b * no * nt * 2 <= memory / s  <=> n1b = memory / (2 * no * nt * s)
-
-    s = maxdtypesize / 1024 / 1024  # convert to MB
-    nt = len(timestamps)
-    no = np.prod(chunksizes) / (nt * chunksizes[0])
-    nt = len(timestamps)
-    n1a = 100 / (stepsize * s * no)
-    n1b = 0.2 * (memory * 1024 / (2 * no * nt * s))
-    logging.debug(f"n1a = {n1a:.2f}, n1b = {n1b:.2f}")
-    n1 = int(np.floor(min(n1a, n1b)))
-    tmp_chunksizes = copy.copy(chunksizes)
-    tmp_chunksizes[0] = min(n1, new_dimsizes[0], chunksizes[0])
-    tmp_chunksizes[-1] = stepsize
-    logging.info(f"Intermediate chunksizes: {tmp_chunksizes}")
-
     # check if target chunk sizes are not too big
     chunksizes = list(chunks.values())
-    if np.prod(chunksizes) * s > 100:  # pragma: no cover
+    if (
+        np.prod(chunksizes) * maxdtypesize > 100 * 1024 ** 2
+    ):  # pragma: no cover
         logging.warn(
             "The specified chunksizes will lead to chunks larger than 100MB!"
         )
+
+    # The intermediate chunks have 2 size constraints:
+    # 1) The size in the time dimension, nsteps, must meet:
+    #        imagesize * nsteps <= memory * safety_factor
+    #    because we will always read in nsteps images at once.
+    #    Reformulated, we get: nsteps = memory/imagesize * safetyfactor
+    # 2) The "chunk base size" (i.e. size of the chunk with only one timestep)
+    #    must be small enough that always 2 chunks with full time fit into
+    #    memory, i.e with ntimes the total number of timesteps, we have:
+    #        chunkbasesize * ntimes <= memory * 2
+    #    or
+    #        chunkbasesize = memory*2/ntimes
+    # Additionally, to avoid too large chunks, we want to limit the chunk size
+    # to 100MB, i.e. chunkbasesize * nsteps <= 100MB
+    ntimes = len(reader.timestamps)
+
+    # First we get the number of allowed steps, with safety factor 2
+    maxnsteps = nimages_for_memory(testds, memory) // 2
+    if stepsize is None:
+        nsteps = min(maxnsteps, ntimes)
+    else:
+        nsteps = min(stepsize, maxnsteps, ntimes)
+    logging.info(f"write_transposed_dataset: Using {stepsize} images per step")
+
+    # Now we get the chunk base size based on the 2 constraints
+    size1 = 2 * memory / ntimes * 1024 ** 3  # in bytes (memory was in GB)
+    size2 = 100 / nsteps * 1024 ** 2  # in bytes (100 was in MB)
+    chunkbasesize = min(size1, size2)
+
+    # To convert the chunkbasesize to a chunk shape, we use the maxdtypesize so
+    # that we can be sure that our constraints from above are met for all
+    # variables. As a starting point we use the size of the final chunks, and
+    # then just adapt the chunk size of the first dimension.
+    # The current chunk base size can be calculated with
+    #     n_0 * n_1 * ... n_{d-2} * dtypesize = chunk base size
+    # if (n_0, ..., n_{d-1}) is the chunk shape (with time dimension).
+    # So we get for n_0:
+    #     n_0 = (chunk base size) / (dtypesize * n_1 * ... * n_{d-2})
+    tmp_chunksizes = copy.copy(chunksizes)
+    tmp_chunksizes[-1] = nsteps
+    # product of other chunk dimensions than first and last
+    nother = np.prod(tmp_chunksizes) / (nsteps * tmp_chunksizes[0])
+    n0 = int(np.floor(chunkbasesize / (maxdtypesize * nother)))
+    n0 = min(n0, new_dimsizes[0])
+    tmp_chunksizes[0] = n0
+    # now our constraint should be met
+    assert np.prod(tmp_chunksizes[:-1]) * maxdtypesize <= chunkbasesize
+    assert np.prod(tmp_chunksizes) * maxdtypesize <= 100 * 1024 ** 2
+    logging.info(f"Intermediate chunksizes: {tmp_chunksizes}")
 
     # create zarr arrays
     tmp_stores = {}
@@ -244,10 +253,10 @@ def _transpose(
 
     # Write the images to zarr files, one file for each variable
 
-    pbar = tqdm(range(0, len(timestamps), stepsize))
+    pbar = tqdm(range(0, len(timestamps), nsteps))
     for start_idx in pbar:
         pbar.set_description("Reading")
-        end_idx = min(start_idx + stepsize - 1, len(timestamps) - 1)
+        end_idx = min(start_idx + nsteps - 1, len(timestamps) - 1)
 
         block = reader.read_block(
             timestamps[start_idx], timestamps[end_idx]

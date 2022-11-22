@@ -118,7 +118,9 @@ class ReaderBase:
         # this also works if ds is a dictionary of numpy arrays
         return {v: ds[v].dtype for v in self.varnames}
 
-    def _metadata_from_dataset(self, ds: xr.Dataset) -> Tuple[Mapping, Mapping]:
+    def _metadata_from_dataset(
+        self, ds: xr.Dataset
+    ) -> Tuple[Mapping, Mapping]:
         global_attrs = dict(ds.attrs)
         array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
         return global_attrs, array_attrs
@@ -127,8 +129,13 @@ class ReaderBase:
         return ds[self.varnames[0]].shape
 
     def _gridinfo_from_dataset(self, ds):
-        return GridInfo.from_dataset(ds, latname=self.latname,
-                                     lonname=self.lonname, ydim=self.ydim, xdim=self.xdim)
+        return GridInfo.from_dataset(
+            ds,
+            latname=self.latname,
+            lonname=self.lonname,
+            ydim=self.ydim,
+            xdim=self.xdim,
+        )
 
     def _gridinfo_from_latlon(self, lat, lon, gridtype):
         assert (
@@ -199,7 +206,9 @@ class ReaderBase:
     def _stack(self, img):
         if self.gridtype != "unstructured":
             if self.gridtype == "regular":
-                img = img.stack(dimensions={"loc": (self.latname, self.lonname)})
+                img = img.stack(
+                    dimensions={"loc": (self.latname, self.lonname)}
+                )
             else:  # curvilinear grid
                 img = img.stack(dimensions={"loc": (self.ydim, self.xdim)})
         return img
@@ -291,7 +300,10 @@ class GridInfo:
                 "'latname' and 'lonname' must either both be specified or"
                 " both be omitted!"
             )
-        assert lat.ndim in [1, 2], "Coordinates must have at most 2 dimensions."
+        assert lat.ndim in [
+            1,
+            2,
+        ], "Coordinates must have at most 2 dimensions."
 
         if ydim is None or xdim is None:
             if lat.ndim == 2:
@@ -310,7 +322,7 @@ class GridInfo:
         else:
             gridtype = "regular"
             locdim = None
-        
+
         obj = cls(
             lat.values,
             lon.values,
@@ -319,7 +331,7 @@ class GridInfo:
             lonname=lonname,
             ydim=ydim,
             xdim=xdim,
-            locdim=locdim
+            locdim=locdim,
         )
         return obj
 
@@ -339,13 +351,18 @@ class GridInfo:
         return grid
 
     @staticmethod
-    def _infer_gridtype(lat: Union[np.ndarray, xr.DataArray], lon: Union[np.ndarray, xr.DataArray]):
+    def _infer_gridtype(
+        lat: Union[np.ndarray, xr.DataArray],
+        lon: Union[np.ndarray, xr.DataArray],
+    ):
         if lat.ndim == 2:
             gridtype = "curvilinear"
         elif lat.ndim == 1:
             if len(lat) != len(lon):
                 gridtype = "regular"
-            elif isinstance(lat, xr.DataArray) and isinstance(lon, xr.DataArray):
+            elif isinstance(lat, xr.DataArray) and isinstance(
+                lon, xr.DataArray
+            ):
                 # easy way failed, let's see if we can get more info from
                 # metadata
                 if lat.dims == lon.dims:
@@ -353,7 +370,9 @@ class GridInfo:
                 else:
                     gridtype = "regular"
             else:  # pragma: no cover
-                raise ReaderError("Inferring grid type failed, pass 'gridtype' explicitly.")
+                raise ReaderError(
+                    "Inferring grid type failed, pass 'gridtype' explicitly."
+                )
         else:  # pragma: no cover
             raise ReaderError("Coordinate array must have 1 or 2 dimensions!")
         return gridtype

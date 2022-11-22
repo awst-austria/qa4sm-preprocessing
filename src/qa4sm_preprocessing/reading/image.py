@@ -32,8 +32,8 @@ The main routines that should be modified when subclassing are:
 
 * ``_open_dataset``: basic routine for reading data from a file and returning
   it as xr.Dataset
-* ``_gridinfo_from_dataset``: For manual adaption of how the grid is generated if
-  it cannot be inferred directly from the file.
+* ``_gridinfo_from_dataset``: For manual adaption of how the grid is generated
+  if it cannot be inferred directly from the file.
 * ``_metadata_from_dataset``: If metadata cannot be read from the files.
 * ``_tstamps_in_file``: If the timestamp cannot be inferred from the filename
   but via other info specific to the dataset this can be used to avoid having
@@ -182,7 +182,8 @@ grid). A reader could look like this::
                 # reduces the 2D tensor product coordinates to 1D coordinates
                 lat = _1d_coord_from_2d(g["latitude"], 0, fill_value=-9999)
                 lon = _1d_coord_from_2d(g["longitude"], 1, fill_value=-9999)
-            # since we now have 1D coordinates for a 2D array, the grid is regular
+            # since we now have 1D coordinates for a 2D array, the grid is
+            # regular
             gridinfo = GridInfo(lat, lon, "regular")
             return gridinfo
 
@@ -519,7 +520,9 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         if average is None:
             self.blockreader = _BlockDataReader(self, file_tstamp_map)
         else:
-            self.blockreader = _AveragingBlockDataReader(self, file_tstamp_map, average)
+            self.blockreader = _AveragingBlockDataReader(
+                self, file_tstamp_map, average
+            )
         self._timestamps = self.blockreader._timestamps
 
         if discard_attrs:
@@ -599,7 +602,8 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                 match = self.time_regex_pattern.findall(fname)
                 if not match:  # pragma: no cover
                     raise ReaderError(
-                        f"Pattern {self.time_regex_pattern} did not match " f"{fname}"
+                        f"Pattern {self.time_regex_pattern} did not match "
+                        f"{fname}"
                     )
                 timestring = match[0]
             else:
@@ -614,7 +618,8 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             ds = self._open_dataset(path)
             if self.timename not in ds.indexes:  # pragma: no cover
                 raise ReaderError(
-                    f"Time dimension {self.timename} does not exist in " f"{str(path)}"
+                    f"Time dimension {self.timename} does not exist in "
+                    f"{str(path)}"
                 )
             time = ds.indexes[self.timename]
             timestamps = [t.to_pydatetime() for t in time]
@@ -622,7 +627,10 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
 
     @property
     def example_dataset(self) -> xr.Dataset:
-        if not hasattr(self, "_example_dataset") or self._example_dataset is None:
+        if (
+            not hasattr(self, "_example_dataset")
+            or self._example_dataset is None
+        ):
             self._example_dataset = self._open_nice_dataset(self._example_file)
         return self._example_dataset
 
@@ -630,7 +638,9 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         self.global_attrs = {}
         self.array_attrs = {v: {} for v in self.varnames}
 
-    def _read_block(self, start, end) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
+    def _read_block(
+        self, start, end
+    ) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
 
         times = self.tstamps_for_daterange(start, end)
         return self.blockreader.read_timestamps(times)
@@ -750,7 +760,8 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                     new_varnames.append(l2name)
                 else:
                     warnings.warn(
-                        f"Skipping variable '{l2name}' because it does" " not exist!"
+                        f"Skipping variable '{l2name}' because it does"
+                        " not exist!"
                     )
             varnames = new_varnames
         return varnames, rename, level
@@ -761,7 +772,9 @@ class _BlockDataReader:
     # timestamps to files out of the reader, in the hope to make it easier for
     # people to subclass the DirectoryImageReader.
 
-    def __init__(self, directoryreader, file_tstamp_map, use_tqdm: bool = True):
+    def __init__(
+        self, directoryreader, file_tstamp_map, use_tqdm: bool = True
+    ):
         self.directoryreader = directoryreader
         self._file_tstamp_map = file_tstamp_map
         self._use_tqdm = use_tqdm  # can only be used to turn it off
@@ -791,7 +804,11 @@ class _BlockDataReader:
     def use_tqdm(self):
         # using tqdm for a progressbar only makes sense if we do not use dask
         # otherwise it's better to use dask's diagnostic tools
-        return self.directoryreader.use_tqdm and self._use_tqdm and not self.use_dask
+        return (
+            self.directoryreader.use_tqdm
+            and self._use_tqdm
+            and not self.use_dask
+        )
 
     def get_file_tstamp_map(self, timestamps):
         # Here we need to get the file_tstamp_map limited to a selection of
@@ -823,9 +840,9 @@ class _BlockDataReader:
         if self.use_dask:
             ntime = len(timestamps)
             shape = self.directoryreader.get_blockshape(ntime)
-            delayed_blockdict = dask.delayed(self._read_single_file_timestamps)(
-                fname, timestamps
-            )
+            delayed_blockdict = dask.delayed(
+                self._read_single_file_timestamps
+            )(fname, timestamps)
             blockdict = {
                 v: dask.array.from_delayed(
                     delayed_blockdict[v], shape=shape, dtype=self.dtype[v]
@@ -851,7 +868,8 @@ class _BlockDataReader:
         return data
 
     def _assemble_blockdict(
-        self, blockdict: Mapping[str, Sequence[Union[np.ndarray, da.core.Array]]]
+        self,
+        blockdict: Mapping[str, Sequence[Union[np.ndarray, da.core.Array]]],
     ) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
         if self.use_dask:
             vstack = da.vstack
@@ -899,7 +917,9 @@ class _AveragingBlockDataReader(_BlockDataReader):
         # which is easier than for the _BlockDataReader
         return {t: self._file_tstamp_map[t] for t in timestamps}
 
-    def calculate_averaging_timestamp(self, average, tstamp) -> datetime.datetime:
+    def calculate_averaging_timestamp(
+        self, average, tstamp
+    ) -> datetime.datetime:
         if average == "daily":
             date = tstamp.date()
             return datetime.datetime(date.year, date.month, date.day)
@@ -919,7 +939,9 @@ class _AveragingBlockDataReader(_BlockDataReader):
         # now we only have to do the averaging and return the data
         for v in self.varnames:
             # otherwise lots of warnings for mean of empty slice
-            warnings.filterwarnings(action="ignore", message="Mean of empty slice")
+            warnings.filterwarnings(
+                action="ignore", message="Mean of empty slice"
+            )
             # take mean along first dimension (time dimension), but add it
             # again so we have it in the shape the data is expected later on.
             data[v] = np.nanmean(data[v], axis=0)[np.newaxis, ...]

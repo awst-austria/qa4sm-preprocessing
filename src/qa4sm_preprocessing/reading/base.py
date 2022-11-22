@@ -75,22 +75,6 @@ class ReaderBase:
         self.xdim = xdim
         self.locdim = locdim
 
-        # additional arguments related to grid setup
-        self.bbox = bbox
-        self.cellsize = cellsize
-        if isinstance(landmask, str):
-            if ":" in landmask:
-                fname, vname = landmask.split(":")
-                self.landmask = xr.open_dataset(fname)[vname]
-            else:
-                self.landmask = self._landmask_from_dataset(ds, landmask)
-        else:
-            self.landmask = landmask
-
-        # infer metadata
-        self.global_attrs, self.array_attrs = self._metadata_from_dataset(ds)
-        self.dtype = self._dtype_from_dataset(ds)
-
         # infer the coordinates and grid
         if lat is not None or lon is not None:
             self.gridinfo = self._gridinfo_from_latlon(lat, lon, gridtype)
@@ -105,10 +89,27 @@ class ReaderBase:
         self.locdim = self.gridinfo.locdim
         self.gridtype = self.gridinfo.gridtype
 
+        # additional arguments related to grid setup
+        self.bbox = bbox
+        self.cellsize = cellsize
+        if isinstance(landmask, str):
+            if ":" in landmask:
+                fname, vname = landmask.split(":")
+                self.landmask = xr.open_dataset(fname)[vname]
+            else:
+                self.landmask = self._landmask_from_dataset(ds, landmask)
+        else:
+            self.landmask = landmask
+
         if construct_grid:
             self.grid = self.finalize_grid(self.gridinfo.construct_grid())
         else:
             self.grid = None
+
+        # infer metadata last, because opening the dataset might only work
+        # correctly if the grid is already set
+        self.global_attrs, self.array_attrs = self._metadata_from_dataset(ds)
+        self.dtype = self._dtype_from_dataset(ds)
         # Done!
 
     def _landmask_from_dataset(self, ds: xr.Dataset, landmask) -> xr.DataArray:

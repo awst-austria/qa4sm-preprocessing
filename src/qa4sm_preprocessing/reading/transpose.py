@@ -177,7 +177,7 @@ def _transpose(
     # check if target chunk sizes are not too big
     chunksizes = list(chunks.values())
     if (
-        np.prod(chunksizes) * maxdtypesize > 100 * 1024 ** 2
+        np.prod(chunksizes) * maxdtypesize > 100 * 1024**2
     ):  # pragma: no cover
         logging.warn(
             "The specified chunksizes will lead to chunks larger than 100MB!"
@@ -204,11 +204,11 @@ def _transpose(
         nsteps = min(maxnsteps, ntimes)
     else:
         nsteps = min(stepsize, maxnsteps, ntimes)
-    logging.info(f"write_transposed_dataset: Using {stepsize} images per step")
+    logging.info(f"write_transposed_dataset: Using {nsteps} images per step")
 
     # Now we get the chunk base size based on the 2 constraints
-    size1 = 2 * memory / ntimes * 1024 ** 3  # in bytes (memory was in GB)
-    size2 = 100 / nsteps * 1024 ** 2  # in bytes (100 was in MB)
+    size1 = 2 * memory / ntimes * 1024**3  # in bytes (memory was in GB)
+    size2 = 100 / nsteps * 1024**2  # in bytes (100 was in MB)
     chunkbasesize = min(size1, size2)
 
     # To convert the chunkbasesize to a chunk shape, we use the maxdtypesize so
@@ -229,7 +229,7 @@ def _transpose(
     tmp_chunksizes[0] = n0
     # now our constraint should be met
     assert np.prod(tmp_chunksizes[:-1]) * maxdtypesize <= chunkbasesize
-    assert np.prod(tmp_chunksizes) * maxdtypesize <= 100 * 1024 ** 2
+    assert np.prod(tmp_chunksizes) * maxdtypesize <= 100 * 1024**2
     logging.info(f"Intermediate chunksizes: {tmp_chunksizes}")
 
     # create zarr arrays

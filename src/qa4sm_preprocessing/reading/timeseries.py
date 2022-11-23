@@ -690,19 +690,25 @@ class TimeseriesListTs(
         varnames: Union[str, Sequence] = None,
         metadata: Mapping[str, Mapping[str, str]] = None,
         cellsize=None,
+        gpi: Union[Sequence, np.ndarray] = None,
     ):
 
+        assert len(timeseries) > 0
+        assert len(timeseries) == len(lat) == len(lon)
+
         # create grid object
-        grid = BasicGrid(lon, lat)
+        grid = BasicGrid(lon, lat, gpi)
         if cellsize is None:  # pragma: no cover
             cellsize = infer_cellsize(grid)
         cellgrid = grid.to_cell_grid(cellsize=cellsize)
 
-        self.timeseries = timeseries
+        if gpi is None:
+            gpi = np.arange(len(timeseries))
+        self.timeseries = {idx: ts for idx, ts in zip(gpi, timeseries)}
 
         if varnames is None:
             # open first dataset to get the variable names
-            ts = self.timeseries[0]
+            ts = self.timeseries[gpi[0]]
             if isinstance(ts, pd.DataFrame):
                 varnames = ts.columns
             elif ts.name is None:

@@ -54,3 +54,7 @@ MANIFEST
 # Per-project virtualenvs
 .venv*/
 .conda*/
+
+# example notebook output
+csv_soil_moisture
+pynectf_soil_moisture

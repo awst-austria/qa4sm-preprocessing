@@ -1,12 +1,11 @@
+import glob
 import numpy as np
 import pandas as pd
 from pathlib import Path
-import shutil
 import yaml
 import zipfile
 
 from qa4sm_preprocessing.reading import (
-    StackImageReader,
     GriddedNcOrthoMultiTs,
     GriddedNcContiguousRaggedTs,
 )
@@ -17,20 +16,17 @@ from qa4sm_preprocessing.utils import (
     preprocess_user_data,
 )
 
-def make_test_timeseries():
+
+def make_test_timeseries(lats=[12, 34, 56], lons=[0.1, 2.3, 4.5]):
     # timeseries 1: daily timestamps
     index = pd.date_range("2020-01-01 12:00", "2020-12-31 12:00", freq="D")
     data = np.random.randn(len(index))
     ts1 = pd.Series(data, index=index, name="soil_moisture")
-    lat1 = 12
-    lon1 = 0.1
 
     # timeseries 2: hourly timestamps, but shorter period
     index = pd.date_range("2020-06-01", "2020-08-01", freq="H")
     data = np.random.randn(len(index)) + 2
     ts2 = pd.Series(data, index=index, name="soil_moisture")
-    lat2 = 34
-    lon2 = 2.3
 
     # timeseries 3: irregular timestamps
     index = pd.DatetimeIndex(
@@ -39,11 +35,7 @@ def make_test_timeseries():
     )
     data = np.random.randn(len(index)) - 2
     ts3 = pd.Series(data, index=index, name="soil_moisture")
-    lat3 = 56
-    lon3 = 4.5
 
-    lats = [lat1, lat2, lat3]
-    lons = [lon1, lon2, lon3]
     timeseries = [ts1, ts2, ts3]
     metadata = {"soil_moisture": {"long_name": "soil moisture", "units": "m^3/m^3"}}
     return timeseries, lats, lons, metadata
@@ -60,16 +52,15 @@ def zip_directory(inpath, outpath):
             zfile.write(f, arcname=zipped_name)
 
 
-
 def test_csv_pipeline(test_output_path):
     # tests the full pipeline going from pandas timeseries to CSVs to zipped
     # directory to gridded contiguous ragged dataset
     timeseries, lats, lons, metadata = make_test_timeseries()
     csv_dir = test_output_path / "csv"
-    if csv_dir.exists():
-        shutil.rmtree(csv_dir)
 
-    make_csv_dataset(timeseries, lats, lons, csv_dir, name="test", metadata=metadata)
+    make_csv_dataset(
+        timeseries, lats, lons, csv_dir, name="test", metadata=metadata, only_ismn=False
+    )
 
     # check if they all look okay
     for i in range(len(timeseries)):
@@ -88,8 +79,6 @@ def test_csv_pipeline(test_output_path):
     # make zip file
     # make zip file
     zfile = test_output_path / "csv.zip"
-    if zfile.exists():
-        zfile.unlink()
     zip_directory(csv_dir, zfile)
 
     # try to read with ZippedCsvTs
@@ -101,8 +90,6 @@ def test_csv_pipeline(test_output_path):
 
     # do the preprocessing with the full preprocessing function
     outpath = test_output_path / "gridded_ts"
-    if outpath.exists():
-        shutil.rmtree(outpath)
     reader = preprocess_user_data(zfile, outpath)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
@@ -123,11 +110,9 @@ def test_contiguous_ragged_pipeline(test_output_path):
     # directory to gridded contiguous ragged dataset
     timeseries, lats, lons, metadata = make_test_timeseries()
     pynetcf_dir = test_output_path / "pynetcf"
-    if pynetcf_dir.exists():
-        shutil.rmtree(pynetcf_dir)
 
     make_gridded_contiguous_ragged_dataset(
-        timeseries, lats, lons, pynetcf_dir, metadata=metadata
+        timeseries, lats, lons, pynetcf_dir, metadata=metadata, only_ismn=False
     )
 
     def check_reader(reader):
@@ -148,14 +133,10 @@ def test_contiguous_ragged_pipeline(test_output_path):
 
     # make zip file
     zfile = test_output_path / "pynetcf.zip"
-    if zfile.exists():
-        zfile.unlink()
     zip_directory(pynetcf_dir, zfile)
 
     # do the preprocessing with the full preprocessing function
     outpath = test_output_path / "gridded_ts"
-    if outpath.exists():
-        shutil.rmtree(outpath)
     reader = preprocess_user_data(zfile, outpath)
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     check_reader(reader)
@@ -163,8 +144,6 @@ def test_contiguous_ragged_pipeline(test_output_path):
 
 def test_stack_pipeline(synthetic_test_args, test_output_path):
     stackpath = test_output_path / "stack.nc"
-    if stackpath.exists():
-        stackpath.unlink()
 
     ds, kwargs = synthetic_test_args
     ds.to_netcdf(stackpath)
@@ -187,21 +166,15 @@ def test_csv_pipeline_no_metadata(test_output_path):
     # directory to gridded contiguous ragged dataset
     timeseries, lats, lons, metadata = make_test_timeseries()
     csv_dir = test_output_path / "csv"
-    if csv_dir.exists():
-        shutil.rmtree(csv_dir)
 
-    make_csv_dataset(timeseries, lats, lons, csv_dir, name="test")
+    make_csv_dataset(timeseries, lats, lons, csv_dir, name="test", only_ismn=False)
 
     # make zip file
     zfile = test_output_path / "csv.zip"
-    if zfile.exists():
-        zfile.unlink()
     zip_directory(csv_dir, zfile)
 
     # do the preprocessing with the full preprocessing function
     outpath = test_output_path / "gridded_ts"
-    if outpath.exists():
-        shutil.rmtree(outpath)
     reader = preprocess_user_data(zfile, outpath)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
@@ -209,3 +182,58 @@ def test_csv_pipeline_no_metadata(test_output_path):
         print(i)
         ts = reader.read(i)["soil_moisture"]
         pd.testing.assert_series_equal(ts, timeseries[i], check_freq=False)
+
+
+def test_csv_pipeline_only_ismn(test_output_path):
+
+    close_lats = [10.88, 41.36, 67.35]
+    close_lons = [-1.07, -106.24, 26.68]
+    apart_lats = [21.94, -16.30, 27.68]
+    apart_lons = [-39.02, 78.75, 151.87]
+    radius = 2
+
+    timeseries_close, _, _, _ = make_test_timeseries(lats=close_lats, lons=close_lons)
+    timeseries_apart, _, _, _ = make_test_timeseries(lats=apart_lats, lons=apart_lons)
+
+    timeseries = timeseries_apart + timeseries_close
+    lats = apart_lats + close_lats
+    lons = apart_lons + close_lons
+
+    csv_dir = test_output_path / "csv"
+    make_csv_dataset(timeseries, lats, lons, csv_dir, name="test", radius=radius)
+
+    # check that only the close_lats/lons are written and that they have the
+    # correct gpis
+    expected_gpis = list(range(len(apart_lats), len(lats)))
+    expected_files = sorted([
+        str(csv_dir / f"test_gpi={i}_lat={lats[i]}_lon={lons[i]}.csv") for i in expected_gpis
+    ])
+    existing_files = sorted(glob.glob(str(csv_dir / "*.csv")))
+    assert expected_files == existing_files
+
+
+def test_contiguous_ragged_pipeline_only_ismn(test_output_path):
+
+    close_lats = [10.88, 41.36, 67.35]
+    close_lons = [-1.07, -106.24, 26.68]
+    apart_lats = [21.94, -16.30, 27.68]
+    apart_lons = [-39.02, 78.75, 151.87]
+    radius = 2
+
+    timeseries_close, _, _, _ = make_test_timeseries(lats=close_lats, lons=close_lons)
+    timeseries_apart, _, _, _ = make_test_timeseries(lats=apart_lats, lons=apart_lons)
+
+    timeseries = timeseries_apart + timeseries_close
+    lats = apart_lats + close_lats
+    lons = apart_lons + close_lons
+
+    pynetcf_dir = test_output_path / "pynetcf"
+    make_gridded_contiguous_ragged_dataset(timeseries, lats, lons, pynetcf_dir, radius=radius)
+
+    reader = GriddedNcContiguousRaggedTs(pynetcf_dir)
+    grid = reader.grid
+
+    expected_gpis = list(range(len(apart_lats), len(lats)))
+    np.testing.assert_equal(np.sort(grid.activearrlat), np.sort(close_lats))
+    np.testing.assert_equal(np.sort(grid.activearrlon), np.sort(close_lons))
+    np.testing.assert_equal(np.sort(grid.activegpis), np.sort(expected_gpis))

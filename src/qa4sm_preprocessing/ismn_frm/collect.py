@@ -1,5 +1,4 @@
 import os.path
-import warnings
 
 import numpy as np
 import xarray as xr
@@ -7,12 +6,12 @@ import xarray as xr
 try:
     import matplotlib
     matplotlib.use("Qt5Agg")
+    import matplotlib.pyplot as plt
     import seaborn as sns
     _enable_plots = False
 except ImportError:
     _enable_plots = False
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 """

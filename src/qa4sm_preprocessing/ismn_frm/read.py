@@ -17,7 +17,7 @@ class FrmSensorInformationReader(CustomMetaReader):
     def read_metadata(self, meta: MetaData):
 
         cond = (self.df['network'] == meta['network'].val) & \
-               (self.df['station'] == meta['station'].val ) & \
+               (self.df['station'] == meta['station'].val) & \
                (self.df['instrument'] == meta['instrument'].val) & \
                (self.df['depth_from'] == meta['instrument'].depth_from) & \
                (self.df['depth_to'] == meta['instrument'].depth_to)

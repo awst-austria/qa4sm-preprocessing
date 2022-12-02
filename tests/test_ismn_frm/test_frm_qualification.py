@@ -10,10 +10,7 @@ def test_frm_classification_from_tcol_results():
     with tempfile.TemporaryDirectory() as out_path:
         val_results = os.path.join(test_data_path, 'preprocessing', 'ismn_frm',
                                    'tcol_SilverSword.nc')
-        create_frm_csv_for_ismn(val_results, out_path=out_path)
-
-        assert os.path.isfile(os.path.join(out_path, 'qi_scatter_frm_class.png'))
-        assert os.path.isfile(os.path.join(out_path, 'qi_bar.png'))
+        create_frm_csv_for_ismn(val_results, out_path=out_path, plot=False)
 
         df = pd.read_csv(os.path.join(out_path, 'frm_classification.csv'),
                          sep=';')

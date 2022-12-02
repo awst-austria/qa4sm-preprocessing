@@ -1,19 +1,27 @@
 import os.path
+import warnings
 
 import numpy as np
 import xarray as xr
 
-import matplotlib
-matplotlib.use("Qt5Agg")
+try:
+    import matplotlib
+    matplotlib.use("Qt5Agg")
+    import seaborn as sns
+    _enable_plots = False
+except ImportError:
+    _enable_plots = False
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 import pandas as pd
 
 """
 Create FRM qualification csv file from validation results that can be read by 
 the ismn package and transferred into the metadata.
 """
+
+class PlottingError(Exception):
+    pass
 
 class FrmTcaQualification:
     def __init__(
@@ -157,6 +165,9 @@ class FrmTcaQualification:
         """
         Create bar plot of QI classifications in out_path.
         """
+        if not _enable_plots:
+            raise PlottingError("Seaborn and matplotlib are required but not installed.")
+
         if self.classification is None:
             raise ValueError("Create classification first.")
 
@@ -182,6 +193,10 @@ class FrmTcaQualification:
             Create scatter for different depths ('depth') or
             different frm classes ('frm').
         """
+        if not _enable_plots:
+            raise PlottingError("Seaborn and matplotlib are required but not installed.")
+
+
         if self.classification is None:
             raise ValueError("Create classification first.")
 
@@ -220,7 +235,8 @@ def create_frm_csv_for_ismn(
         var_depth_from='instrument_depthfrom_between_00-ISMN_and_01-ERA5_LAND',
         var_depth_to='instrument_depthto_between_00-ISMN_and_01-ERA5_LAND',
         var_nobs='n_obs',
-        out_path='/tmp'
+        plot=False,
+        out_path='/tmp',
 ):
     """
     Collect triple collocation results from QA4SM validation and compute
@@ -245,6 +261,8 @@ def create_frm_csv_for_ismn(
         The ISMN sensor depth_to variable in the validation results.
     var_nobs: str, optional
         The relevant nobs variable that is used to classify ISMN sensors.
+    plot: bool, optional (default: False)
+        Create plots.
     out_path: str, optional
         Path where the output csv file is stored.
     """
@@ -265,6 +283,8 @@ def create_frm_csv_for_ismn(
         snr_ci_delta_thres=3,
     )
 
-    frm_qi.plot_bar()
-    frm_qi.plot_scatter('frm')
+    if plot:
+        frm_qi.plot_bar()
+        frm_qi.plot_scatter('frm')
+
     frm_qi.export()

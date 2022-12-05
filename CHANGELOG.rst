@@ -2,6 +2,12 @@
 Changelog
 =========
 
+v0.1.4
+======
+- new subpackage ismn_frm
+- level 2 and timeseries data readers
+- bug fixes
+
 v0.1.3
 ==========
 - renaming of keyword ``latdim`` to ``ydim`` and ``londim`` to ``xdim`` in the

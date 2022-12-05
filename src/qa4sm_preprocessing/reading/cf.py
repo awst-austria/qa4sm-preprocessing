@@ -15,13 +15,17 @@ custom_criteria = {
     "latitude": {
         "standard_name": re.compile("lat|latitude", re.IGNORECASE),
         "long_name": re.compile("lat|latitude", re.IGNORECASE),
-        "units": "degree_north|degree_N|degreeN|degrees_north|degrees_N|degreesN",
+        "units": (
+            "degree_north|degree_N|degreeN|degrees_north|degrees_N|degreesN"
+        ),
         "_CoordinateAxisType": "Lat",
     },
     "longitude": {
         "standard_name": re.compile("lon|longitude", re.IGNORECASE),
         "long_name": re.compile("lon|longitude", re.IGNORECASE),
-        "units": "degree_east|degree_E|degreeE|degrees_east|degrees_E|degreesE",
+        "units": (
+            "degree_east|degree_E|degreeE|degrees_east|degrees_E|degreesE"
+        ),
         "_CoordinateAxisType": "Lon",
     },
     "time": {
@@ -54,12 +58,15 @@ def get_time(ds):
         candidates = []
         candidates = list(
             filter(
-                lambda v: ds[v].ndim == 1 and np.issubdtype(ds[v].dtype, np.datetime64),
+                lambda v: ds[v].ndim == 1
+                and np.issubdtype(ds[v].dtype, np.datetime64),
                 ds.variables,
             )
         )
         if len(candidates) > 1:  # pragma: no cover
-            raise ReaderError(f"More than one time coordinate found: {candidates}")
+            raise ReaderError(
+                f"More than one time coordinate found: {candidates}"
+            )
         if len(candidates) == 0:  # pragma: no cover
             raise ReaderError("No time coordinate found!")
         time = ds[candidates[0]]

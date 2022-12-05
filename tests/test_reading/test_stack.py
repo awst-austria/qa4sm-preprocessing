@@ -5,6 +5,8 @@ from qa4sm_preprocessing.reading import (
     StackImageReader,
 )
 
+from qa4sm_preprocessing.reading.base import _1d_coord_from_2d
+
 from .utils import validate_reader
 
 
@@ -27,12 +29,15 @@ def test_cf_conventions(synthetic_test_args):
     if reader.gridtype == "regular":
         assert reader.ydim == "mylat"
         assert reader.xdim == "mylon"
+        assert reader.locdim == None
     elif reader.gridtype == "curvilinear":
         assert reader.ydim == "y"
         assert reader.xdim == "x"
+        assert reader.locdim == None
     else:
-        assert reader.ydim == "location"
-        assert reader.xdim == "location"
+        assert reader.ydim == None
+        assert reader.xdim == None
+        assert reader.locdim == "location"
     validate_reader(reader, ds)
 
 
@@ -60,7 +65,15 @@ def test_2d_to_1d(curvilinear_test_dataset):
     # this tests if we can infer the 1D coordinate arrays from 2D arrays if
     # the 2D arrays are tensor products of the 1D products
     ds = curvilinear_test_dataset
-    reader = StackImageReader(ds, gridtype="regular")
+    lat = _1d_coord_from_2d(ds.lat.values, 0)
+    lon = _1d_coord_from_2d(ds.lon.values, 1)
+    ds_1d = (ds.copy()
+         .assign_coords({"y": lat, "x": lon})
+         .drop(["lat", "lon"])
+         .rename({"y": "lat", "x": "lon"})
+     )
+
+    reader = StackImageReader(ds_1d)
 
     dims = dict(ds.dims)
     lat = np.linspace(0, 1, dims["y"])
@@ -96,3 +109,22 @@ def test_coordinate_metadata(synthetic_test_args):
     assert block.lat.attrs["standard_name"] == "latitude"
     assert block.lon.attrs["standard_name"] == "longitude"
     assert block.time.attrs["standard_name"] == "time"
+
+
+def test_dimension_orders(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    if "lat" in ds.X.dims:
+        newds = ds.transpose("lon", "time", "lat")
+        expected_dims = ("time", "lat", "lon")
+    elif "x" in ds.X.dims:
+        newds = ds.transpose("x", "time", "y")
+        expected_dims = ("time", "y", "x")
+    else:
+        newds = ds.transpose("location", "time")
+        expected_dims = ("time", "location")
+    reader = StackImageReader(newds, **kwargs)
+    assert reader.latname == "lat"
+    assert reader.lonname == "lon"
+    assert reader.timename == "time"
+    assert reader.get_dims() == expected_dims
+    validate_reader(reader, ds)

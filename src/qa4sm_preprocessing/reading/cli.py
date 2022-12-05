@@ -213,6 +213,13 @@ class ReaderArgumentParser(argparse.ArgumentParser):
             default=2,
             help="The amount of memory to use as buffer in GB",
         )
+        self.add_argument(
+            "--rename",
+            type=str,
+            nargs="+",
+            metavar="OLDNAME:NEWNAME",
+            help="Renaming that should be applied.",
+        )
 
 
 class RepurposeArgumentParser(ReaderArgumentParser):
@@ -265,6 +272,13 @@ def parse_args(parser, args):
             dimname, val = argument.split(":")
             level[dimname] = int(val)
 
+    rename = args.rename
+    if rename is not None:
+        rename = {}
+        for argument in args.rename:
+            old, new = argument.split(":")
+            rename[old] = new
+
     common_reader_kwargs = dict(
         latname=args.latname,
         lonname=args.lonname,
@@ -276,6 +290,7 @@ def parse_args(parser, args):
         bbox=args.bbox,
         landmask=args.landmask,
         level=level,
+        rename=rename,
     )
 
     input_path = Path(args.dataset_root)

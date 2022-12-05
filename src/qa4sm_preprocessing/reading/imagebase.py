@@ -2,6 +2,7 @@ from abc import abstractmethod
 import dask
 import dask.array as da
 import datetime
+import logging
 import numpy as np
 from pathlib import Path
 import shutil
@@ -79,10 +80,69 @@ class ImageReaderBase(ReaderBase):
     def timestamps(self):
         return self._timestamps
 
+    @property
+    def imgshape(self):
+        if self.gridtype == "regular":
+            return (len(self.lat), len(self.lon))
+        else:
+            # for curvilinear and unstructured grids, the latitude has the same
+            # shape as the data
+            return self.lat.shape
+
+    @property
+    def imgndim(self):
+        if self.gridtype == "unstructured":
+            return 1
+        else:
+            return 2
+
+    def get_blockshape(self, ntime):
+        return tuple([ntime] + list(self.imgshape))
+
+    def _empty_blockdict(self, ntime):
+        shape = self.get_blockshape(ntime)
+        return {v: np.empty(shape, dtype=self.dtype[v]) for v in self.varnames}
+
+    def _fix_ndim(self, arr: np.ndarray) -> np.ndarray:
+        if arr.ndim == self.imgndim:
+            # we need to add a time axis
+            arr = arr[np.newaxis, ...]
+        elif arr.ndim >= self.imgndim + 2:  # pragma: no cover
+            raise ReaderError(
+                f"Data with shape {arr.shape} has wrong number of dimensions"
+            )
+        return arr
+
+    def get_dims(self):
+        if self.gridtype == "regular":
+            dims = (self.timename, self.latname, self.lonname)
+        elif self.gridtype == "curvilinear":
+            dims = (self.timename, self.ydim, self.xdim)
+        else:  # unstructured grid
+            dims = (self.timename, self.locdim)
+        return dims
+
+    def get_coords(self, times):
+        coords = {}
+        coords[self.timename] = times
+        if self.gridtype == "regular":
+            # we can simply wrap the data with time, lat, and lon
+            coords[self.latname] = self.lat
+            coords[self.lonname] = self.lon
+        elif self.gridtype == "curvilinear":
+            coords[self.latname] = ([self.ydim, self.xdim], self.lat)
+            coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
+        else:  # unstructured grid
+            coords[self.latname] = (self.locdim, self.lat.data)
+            coords[self.lonname] = (self.locdim, self.lon.data)
+        return coords
+
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
-    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:  # pragma: no cover
+    ) -> Dict[
+        str, Union[np.ndarray, dask.array.core.Array]
+    ]:  # pragma: no cover
         """
         Reads multiple images of a dataset as a numpy/dask array.
 
@@ -168,23 +228,11 @@ class ImageReaderBase(ReaderBase):
 
         # Now we have to set the coordinates/dimensions correctly.  This works
         # differently depending on how the original data is structured:
-        coords = {}
-        coords[self.timename] = times
-        if self.gridtype == "regular":
-            # we can simply wrap the data with time, lat, and lon
-            coords[self.latname] = self.lat
-            coords[self.lonname] = self.lon
-            dims = (self.timename, self.latname, self.lonname)
-        elif self.gridtype == "curvilinear":
-            coords[self.latname] = ([self.ydim, self.xdim], self.lat)
-            coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
-            dims = (self.timename, self.ydim, self.xdim)
-        else:  # unstructured grid
-            coords[self.latname] = (self.locdim, self.lat.data)
-            coords[self.lonname] = (self.locdim, self.lon.data)
-            dims = (self.timename, self.locdim)
+        coords = self.get_coords(times)
+        dims = self.get_dims()
         arrays = {
-            name: (dims, data, array_attrs[name]) for name, data in block_dict.items()
+            name: (dims, data, array_attrs[name])
+            for name, data in block_dict.items()
         }
         block = xr.Dataset(arrays, coords=coords, attrs=self.global_attrs)
 
@@ -213,7 +261,9 @@ class ImageReaderBase(ReaderBase):
             )
         return block
 
-    def read(self, timestamp: Union[datetime.datetime, str], **kwargs) -> Image:
+    def read(
+        self, timestamp: Union[datetime.datetime, str], **kwargs
+    ) -> Image:
         """
         Read a single image at a given timestamp. Raises `ReaderError` if
         timestamp is not available in the dataset.
@@ -237,17 +287,24 @@ class ImageReaderBase(ReaderBase):
             timestamp = mkdate(timestamp)
 
         if timestamp not in self.timestamps:  # pragma: no cover
-            raise ReaderError(f"Timestamp {timestamp} is not available in the dataset!")
+            raise ReaderError(
+                f"Timestamp {timestamp} is not available in the dataset!"
+            )
 
-        img = self.read_block(timestamp, timestamp, _apply_landmask_bbox=False).isel(
-            {self.timename: 0}
-        )
+        img = self.read_block(
+            timestamp, timestamp, _apply_landmask_bbox=False
+        ).isel({self.timename: 0})
         img = self._stack(img)
-        data = {
-            varname: img[varname].values[self.grid.activegpis]
-            for varname in self.varnames
+        data = {}
+        for varname in self.varnames:
+            var = img[varname].values
+            if len(var) == len(self.grid.activegpis):
+                data[varname] = var
+            else:
+                data[varname] = var[self.grid.activegpis]
+        metadata = {
+            varname: img[varname].attrs.copy() for varname in self.varnames
         }
-        metadata = {varname: img[varname].attrs.copy() for varname in self.varnames}
         img = Image(
             self.grid.arrlon,
             self.grid.arrlat,
@@ -300,11 +357,14 @@ class ImageReaderBase(ReaderBase):
         start, end = self._validate_start_end(start, end)
         if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
-        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
+        if not (
+            outpath / "grid.nc"
+        ).exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
             array_attrs = {v: testimg[v].attrs.copy() for v in self.varnames}
             n = nimages_for_memory(testimg, memory)
+            logging.info(f"Reading {n} images at once.")
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
@@ -323,5 +383,8 @@ class ImageReaderBase(ReaderBase):
             reshuffler.calc()
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 self.use_tqdm = orig_tqdm
+        else:
+            logging.info(f"Output path already exists: {str(outpath)}")
+
         reader = GriddedNcOrthoMultiTs(str(outpath), **reader_kwargs)
         return reader

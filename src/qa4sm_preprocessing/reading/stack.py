@@ -126,12 +126,15 @@ class StackImageReader(ImageReaderBase):
         cellsize: float = None,
         timeoffsetvarname=None,
         timeoffsetunit=None,
+        rename: dict = None,
         **open_dataset_kwargs,
     ):
 
         if isinstance(ds, (str, Path)):
             ds = xr.open_dataset(ds, **open_dataset_kwargs)
         varnames = self._maybe_add_varnames(varnames, [timeoffsetvarname])
+        if rename is not None:
+            ds = ds.rename(rename)
 
         super().__init__(
             ds,
@@ -158,6 +161,7 @@ class StackImageReader(ImageReaderBase):
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
     ) -> xr.Dataset:
-        block = self.data.sel({self.timename: slice(start, end)})
-        block_dict = {var: block[var].data for var in self.varnames}
+        block = self.data.sel({self.timename: slice(start, end)})[self.varnames]
+        block = block.transpose(*self.get_dims())
+        block_dict = {v: self._fix_ndim(block[v].data) for v in self.varnames}
         return block_dict

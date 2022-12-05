@@ -650,7 +650,12 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
     ) -> Mapping[str, Union[np.ndarray, da.core.Array]]:
         # this function reads a xr.Dataset and converts it to the dictionary
         # format that is used internally
-        ds = self._open_nice_dataset(fname)
+        dims = self.get_dims()
+        ds = self._open_nice_dataset(fname)[self.varnames]
+        # since we pass the data as dictionary of numpy arrays, we need to make
+        # sure that the dimensions are in the order in which they are expected.
+        actual_dims = [d for d in dims if d in list(ds.dims)]
+        ds = ds.transpose(*actual_dims)
         data = {v: self._fix_ndim(ds[v].data) for v in self.varnames}
         return data
 

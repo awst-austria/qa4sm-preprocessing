@@ -113,23 +113,29 @@ class ImageReaderBase(ReaderBase):
             )
         return arr
 
-    def get_coords_dims(self, times):
+    def get_dims(self):
+        if self.gridtype == "regular":
+            dims = (self.timename, self.latname, self.lonname)
+        elif self.gridtype == "curvilinear":
+            dims = (self.timename, self.ydim, self.xdim)
+        else:  # unstructured grid
+            dims = (self.timename, self.locdim)
+        return dims
+
+    def get_coords(self, times):
         coords = {}
         coords[self.timename] = times
         if self.gridtype == "regular":
             # we can simply wrap the data with time, lat, and lon
             coords[self.latname] = self.lat
             coords[self.lonname] = self.lon
-            dims = (self.timename, self.latname, self.lonname)
         elif self.gridtype == "curvilinear":
             coords[self.latname] = ([self.ydim, self.xdim], self.lat)
             coords[self.lonname] = ([self.ydim, self.xdim], self.lon)
-            dims = (self.timename, self.ydim, self.xdim)
         else:  # unstructured grid
             coords[self.latname] = (self.locdim, self.lat.data)
             coords[self.lonname] = (self.locdim, self.lon.data)
-            dims = (self.timename, self.locdim)
-        return coords, dims
+        return coords
 
     @abstractmethod
     def _read_block(
@@ -222,7 +228,8 @@ class ImageReaderBase(ReaderBase):
 
         # Now we have to set the coordinates/dimensions correctly.  This works
         # differently depending on how the original data is structured:
-        coords, dims = self.get_coords_dims(times)
+        coords = self.get_coords(times)
+        dims = self.get_dims()
         arrays = {
             name: (dims, data, array_attrs[name])
             for name, data in block_dict.items()

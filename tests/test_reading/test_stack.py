@@ -109,3 +109,22 @@ def test_coordinate_metadata(synthetic_test_args):
     assert block.lat.attrs["standard_name"] == "latitude"
     assert block.lon.attrs["standard_name"] == "longitude"
     assert block.time.attrs["standard_name"] == "time"
+
+
+def test_dimension_orders(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    if "lat" in ds.X.dims:
+        newds = ds.transpose("lon", "time", "lat")
+        expected_dims = ("time", "lat", "lon")
+    elif "x" in ds.X.dims:
+        newds = ds.transpose("x", "time", "y")
+        expected_dims = ("time", "y", "x")
+    else:
+        newds = ds.transpose("location", "time")
+        expected_dims = ("time", "location")
+    reader = StackImageReader(newds, **kwargs)
+    assert reader.latname == "lat"
+    assert reader.lonname == "lon"
+    assert reader.timename == "time"
+    assert reader.get_dims() == expected_dims
+    validate_reader(reader, ds)

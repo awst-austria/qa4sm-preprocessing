@@ -311,9 +311,9 @@ def test_directory_image_reader_latlon_from_2d(regular_test_dataset, test_output
         ["X", "Y"],
         fmt="synthetic_%Y%m%dT%H%M.nc",
         latname="LAT",
-        xdim="lat",
+        ydim="lat",
         lonname="LON",
-        ydim="lon",
+        xdim="lon",
     )
     validate_reader(reader, orig_ds)
 

@@ -308,7 +308,28 @@ class GridInfo:
 
         if ydim is None or xdim is None:
             if lat.ndim == 2:
-                ydim, xdim = lat.dims
+                def get_other(dims, d):
+                    assert len(dims) == 2
+                    dimlist = list(dims)
+                    dimlist.remove(d)
+                    return dimlist[0]
+
+                def get_name(dims, candidates):
+                    for c in candidates:
+                        if c in dims:
+                            return c
+                    return None
+
+                xdim = get_name(lat.dims, "xX")
+                ydim = get_name(lat.dims, "yY")
+
+                if xdim is None and ydim is None:
+                    # we just guess that y is first, as is commonly done
+                    ydim, xdim = lat.dims
+                elif xdim is None:
+                    xdim = get_other(lat.dims, ydim)
+                elif ydim is None:
+                    ydim = get_other(lat.dims, xdim)
             else:
                 ydim = lat.dims[0]
                 xdim = lon.dims[0]
@@ -317,6 +338,10 @@ class GridInfo:
         if lat.ndim == 2:
             gridtype = "curvilinear"
             locdim = None
+            # in this case we need to make sure that the coordinates
+            # are having dimensions (ydim, xdim)
+            lat = lat.transpose(ydim, xdim)
+            lon = lon.transpose(ydim, xdim)
         elif ydim == xdim:
             gridtype = "unstructured"
             locdim = ydim

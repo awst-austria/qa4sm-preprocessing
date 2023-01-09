@@ -93,6 +93,7 @@ def test_csv_pipeline(test_output_path):
     reader = preprocess_user_data(zfile, outpath)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
+    assert reader.existing_variables() == ["soil_moisture"]
     for i in range(len(timeseries)):
         ts = reader.read(i)["soil_moisture"]
         pd.testing.assert_series_equal(ts, timeseries[i], check_freq=False)
@@ -140,6 +141,7 @@ def test_contiguous_ragged_pipeline(test_output_path):
     reader = preprocess_user_data(zfile, outpath)
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     check_reader(reader)
+    assert reader.existing_variables() == ["soil_moisture"]
 
 
 def test_stack_pipeline(synthetic_test_args, test_output_path):
@@ -159,6 +161,7 @@ def test_stack_pipeline(synthetic_test_args, test_output_path):
             assert np.all(ts == ref)
             ts = reader.read(lon, lat)[var]
             assert np.all(ts == ref)
+    assert reader.existing_variables() == ["X", "Y"]
 
 
 def test_csv_pipeline_no_metadata(test_output_path):
@@ -205,9 +208,12 @@ def test_csv_pipeline_only_ismn(test_output_path):
     # check that only the close_lats/lons are written and that they have the
     # correct gpis
     expected_gpis = list(range(len(apart_lats), len(lats)))
-    expected_files = sorted([
-        str(csv_dir / f"test_gpi={i}_lat={lats[i]}_lon={lons[i]}.csv") for i in expected_gpis
-    ])
+    expected_files = sorted(
+        [
+            str(csv_dir / f"test_gpi={i}_lat={lats[i]}_lon={lons[i]}.csv")
+            for i in expected_gpis
+        ]
+    )
     existing_files = sorted(glob.glob(str(csv_dir / "*.csv")))
     assert expected_files == existing_files
 
@@ -228,7 +234,9 @@ def test_contiguous_ragged_pipeline_only_ismn(test_output_path):
     lons = apart_lons + close_lons
 
     pynetcf_dir = test_output_path / "pynetcf"
-    make_gridded_contiguous_ragged_dataset(timeseries, lats, lons, pynetcf_dir, radius=radius)
+    make_gridded_contiguous_ragged_dataset(
+        timeseries, lats, lons, pynetcf_dir, radius=radius
+    )
 
     reader = GriddedNcContiguousRaggedTs(pynetcf_dir)
     grid = reader.grid

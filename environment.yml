@@ -4,7 +4,7 @@ channels:
   - defaults
 dependencies:
   - pandas
-  - numpy
+  - numpy<=1.23   # can be removed if pynetcf has new version
   - defaults::xarray
   - dask
   - netcdf4

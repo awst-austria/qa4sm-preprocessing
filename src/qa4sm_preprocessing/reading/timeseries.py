@@ -24,6 +24,7 @@ from pynetcf.time_series import (
 
 from .base import ReaderBase
 from .utils import numpy_timeoffsetunit, infer_cellsize
+from .exceptions import ReaderError
 
 
 class _TimeModificationMixin:
@@ -617,12 +618,21 @@ class ZippedCsvTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
         gpis = np.empty(len(self.fnames), dtype=int)
         self.gpi_index_map = {}
         for i, name in enumerate(self.fnames):
-            gpi = int(re.findall(r".*gpi=([0-9]+).*\.csv", name)[0])
+            match = re.findall(r".*gpi=([0-9]+).*\.csv", name)
+            if len(match) != 1:
+                raise ReaderError(f"Extracting gpi from filename {name} failed.")
+            gpi = int(match[0])
             gpis[i] = gpi
             # mapping from gpi to index for  _read_gp
             self.gpi_index_map[gpi] = i
-            lats[i] = float(re.findall(r".*lat=([0-9.]+).*\.csv", name)[0])
-            lons[i] = float(re.findall(r".*lon=([0-9.]+).*\.csv", name)[0])
+            match = re.findall(r".*lat=([0-9.]+).*\.csv", name)
+            if len(match) != 1:
+                raise ReaderError(f"Extracting lat from filename {name} failed.")
+            lats[i] = float(match[0])
+            match = re.findall(r".*lon=([0-9.]+).*\.csv", name)
+            if len(match) != 1:
+                raise ReaderError(f"Extracting lon from filename {name} failed.")
+            lons[i] = float(match[0])
 
         # create grid object
         grid = BasicGrid(lons, lats, gpis=gpis)

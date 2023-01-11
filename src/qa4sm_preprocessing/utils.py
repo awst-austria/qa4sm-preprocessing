@@ -130,9 +130,7 @@ def make_gridded_contiguous_ragged_dataset(
             newlons.append(lon)
             newgpis.append(gpi)
             newts.append(ts)
-        assert len(newts) > 0, (
-            "No timeseries close to selected coordinates found!"
-        )
+        assert len(newts) > 0, "No timeseries close to selected coordinates found!"
         reader = TimeseriesListTs(
             newts, newlats, newlons, metadata=metadata, gpi=newgpis
         )
@@ -204,7 +202,7 @@ def preprocess_user_data(uploaded, outpath, max_filesize=10):
     """
     uploaded = Path(uploaded)
     outpath = Path(outpath)
-    if uploaded.name.endswith(".nc"):
+    if uploaded.name.endswith(".nc") or uploaded.name.endswith(".nc4"):
         # user upload of netCDF stack
         reader = StackImageReader(uploaded)
         return reader.repurpose(outpath)
@@ -221,7 +219,9 @@ def preprocess_user_data(uploaded, outpath, max_filesize=10):
 
         filelist = zfile.namelist()
 
-        nc_files_present = any(map(lambda s: s.endswith(".nc"), filelist))
+        nc_files_present = any(
+            map(lambda s: s.endswith(".nc") or s.endswith(".nc4"), filelist)
+        )
         csv_files_present = any(map(lambda s: s.endswith(".csv"), filelist))
 
         if not nc_files_present and not csv_files_present:  # pragma: no cover
@@ -258,13 +258,13 @@ def ismn_grid():
         import numpy as np
         from pygeogrids.grids import BasicGrid
         from pygeogrids.netcdf import save_grid
-    
+
         df = pd.read_csv("ISMN_v202202.csv", header=[0, 1])
         lat = df[("latitude", "val")]
         lon = df[("longitude", "val")]
         # to keep only unique combinations of lat and lon
         lat, lon = np.array(list(set(zip(lat, lon)))).T
-    
+
         grid = BasicGrid(lon, lat)
         save_grid("ismn_grid.nc", grid)
     """

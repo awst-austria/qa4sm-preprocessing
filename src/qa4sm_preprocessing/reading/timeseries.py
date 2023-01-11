@@ -146,14 +146,22 @@ class _TimeseriesRepurposeMixin:
 
 class _EasierGriddedNcMixin:
 
-    def existing_variables(self):
+    def variable_description(self) -> Mapping[str, Mapping]:
+        """
+        Returns
+        -------
+        attrs : dict
+            A dictionary mapping existing variables to metadata stored in the
+            netCDF files.
+        """
         ncfiles = glob.glob(str(Path(self.path) / "*.nc"))
         fname = next(filter(lambda s: not s.endswith("grid.nc"), ncfiles))
 
         with xr.open_dataset(fname) as ds:
             uninteresting = ["row_size", "location_id", "location_description"]
-            data_vars = [v for v in list(ds.data_vars) if v not in uninteresting]
-        return data_vars
+            attrs = {v: dict(ds[v].attrs) for v in list(ds.data_vars) if v not
+                     in uninteresting}
+        return attrs
 
     def _get_grid(self, ts_path, grid, kd_tree_name="pykdtree"):
         if grid is None:  # pragma: no branch

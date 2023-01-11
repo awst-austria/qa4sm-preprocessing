@@ -93,7 +93,14 @@ def test_csv_pipeline(test_output_path):
     reader = preprocess_user_data(zfile, outpath)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
-    assert reader.existing_variables() == ["soil_moisture"]
+    desc = {
+        "soil_moisture": {
+            "name": "soil_moisture",
+            "long_name": "soil moisture",
+            "units": "m^3/m^3",
+        }
+    }
+    assert reader.variable_description() == desc
     for i in range(len(timeseries)):
         ts = reader.read(i)["soil_moisture"]
         pd.testing.assert_series_equal(ts, timeseries[i], check_freq=False)
@@ -141,7 +148,14 @@ def test_contiguous_ragged_pipeline(test_output_path):
     reader = preprocess_user_data(zfile, outpath)
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     check_reader(reader)
-    assert reader.existing_variables() == ["soil_moisture"]
+    desc = {
+        "soil_moisture": {
+            "name": "soil_moisture",
+            "long_name": "soil moisture",
+            "units": "m^3/m^3",
+        }
+    }
+    assert reader.variable_description() == desc
 
 
 def test_stack_pipeline(synthetic_test_args, test_output_path):
@@ -161,7 +175,11 @@ def test_stack_pipeline(synthetic_test_args, test_output_path):
             assert np.all(ts == ref)
             ts = reader.read(lon, lat)[var]
             assert np.all(ts == ref)
-    assert reader.existing_variables() == ["X", "Y"]
+    desc = {
+        "X": {"long_name": "eks", "name": "X", "unit": "m"},
+        "Y": {"long_name": "why", "name": "Y", "unit": "m"},
+    }
+    assert reader.variable_description() == desc
 
 
 def test_csv_pipeline_no_metadata(test_output_path):

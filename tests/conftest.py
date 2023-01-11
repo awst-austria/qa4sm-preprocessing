@@ -73,6 +73,11 @@ def make_curvilinear_test_dataset():
             "lon": (["y", "x"], LON),
         },
     )
+    ds.X.attrs["unit"] = "m"
+    ds.X.attrs["long_name"] = "eks"
+    ds.Y.attrs["unit"] = "m"
+    ds.Y.attrs["long_name"] = "why"
+    ds.attrs["description"] = "test dataset"
     return ds
 
 

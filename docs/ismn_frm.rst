@@ -11,7 +11,7 @@ To perform the validation use QA4SM or lower level ``smecv_validation`` package:
 https://git.eodc.eu/cci-sm-work/smecv_validation
 
 .. image:: ./imgs/frm_qi_v1.png
-  :width: 100
+  :width: 400
 
 Then a script like the following one can be used to perform the classification
 based on the SNR, CI, and nobs metrics for a sensor::

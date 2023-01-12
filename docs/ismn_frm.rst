@@ -7,20 +7,24 @@ This module handles creating the FRM qualifications. It uses a triple collocatio
 validation for all ISMN sensors in 0-10 cm depth from all available networks with
 ERA5-Land and ESA CCI SM v06.1 PASSIVE.
 
-To perform the validation use QA4SM or lower level ``smecv_validation`` package:
+To perform the validation use QA4SM or the lower level ``smecv_validation`` package:
 https://git.eodc.eu/cci-sm-work/smecv_validation
 
+The following thresholds were used for QA4SM Release 2 (`ISMN_v202301`)
 .. image:: ./imgs/frm_qi_v1.png
   :width: 400
 
 Then a script like the following one can be used to perform the classification
-based on the SNR, CI, and nobs metrics for a sensor::
+based on the `SNR`, `CI`, and `nobs` metrics for a sensor::
 
     import os
     from qa4sm_preprocessing.ismn_frm.collect import create_frm_csv_for_ismn
 
     ismn_data_path = "/home/wpreimes/shares/radar/Projects/FRM4SM/07_data/ismn_data/ISMN_v202301/"
-    tcol_val_result = os.path.join(ismn_data_path, "preprocessing/frm_ tcol_80pCI_ismnG_ccip_era5/ismn_val_1980-01-01_TO_2022-12-31_in_0_TO_0_1.nc")
+    tcol_val_result = os.path.join(
+        ismn_data_path, "preprocessing", "frm_ tcol_80pCI_ismnG_ccip_era5",
+        "ismn_val_1980-01-01_TO_2022-12-31_in_0_TO_0_1.nc"
+    )
 
     create_frm_csv_for_ismn(
             tcol_val_result,
@@ -39,7 +43,6 @@ for all ismn sensors where the validation could be performed. This file can then
 be used by the ismn reader package to add the qualification as additional
 ``python_metadata`` to the data via (this can take some time)::
 
-    import shutil
     import ismn
     if ismn.__version__ < "1.3.0":
         raise NotImplementedError("Custom metadata readers are only available from "

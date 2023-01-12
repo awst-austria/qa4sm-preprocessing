@@ -44,21 +44,28 @@ for all ismn sensors where the validation could be performed. This file can then
 be used by the ismn reader package to add the qualification as additional
 ``python_metadata`` to the data via (this can take some time)::
 
+    import os
     import ismn
     if ismn.__version__ < "1.3.0":
-        raise NotImplementedError("Custom metadata readers are only available from "
-                                  "version 1.3.0 of ismn package onwards.")
+        raise NotImplementedError(
+            "Custom metadata readers are only available from "
+            "version 1.3.0 of ismn package onwards.")
     from ismn.interface import ISMN_Interface
     from ismn.custom import CustomSensorMetadataCsv
+    import numpy as np
 
     qi_reader = CustomSensorMetadataCsv(
-        os.path.join(ismn_data_path, "preprocessing", "frm_classification.csv")
+        os.path.join(ismn_data_path, "preprocessing", "frm_classification.csv"),
+        fill_values={'frm_class': 'undeducible', 'frm_snr': np.nan, 'frm_nobs': np.nan}
     )
 
-    if os.path.exists(os.path.join(os.path.join(ismn_data_path, 'extracted', 'python_metadata')):
+    if os.path.exists(os.path.join(
+            ismn_data_path, 'extracted', 'python_metadata')):
         raise ValueError("Metadata already exists, please delete it.")
 
-    ds = ISMN_Interface(os.path.join(ismn_data_path, 'extracted'), custom_meta_reader=qi_reader, parallel=True)
+    ds = ISMN_Interface(os.path.join(ismn_data_path, 'extracted'),
+                        custom_meta_reader=[qi_reader], parallel=True)
+
 
 If at one point the ``python_metadata`` is deleted for some reason, the FRM
 qualification must be included again as described above. Otherwise it won't be

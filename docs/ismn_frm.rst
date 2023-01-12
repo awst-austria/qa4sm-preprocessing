@@ -11,6 +11,7 @@ To perform the validation use QA4SM or the lower level ``smecv_validation`` pack
 https://git.eodc.eu/cci-sm-work/smecv_validation
 
 The following thresholds were used for QA4SM Release 2 (`ISMN_v202301`)
+
 .. image:: ./imgs/frm_qi_v1.png
   :width: 400
 

@@ -15,6 +15,8 @@ except ImportError:
 import pandas as pd
 
 """
+See documentation in: docs/ismn_frm.rst
+
 Create FRM qualification csv file from validation results that can be read by 
 the ismn package and transferred into the metadata.
 """

@@ -15,6 +15,14 @@ qa4sm-preprocessing
 This package contains functions to preprocess certain data before using them
 in the QA4SM online validation framework.
 
+ISMN FRM
+========
+
+This module contains the routine to assign FRM qualifications ISMN sensors.
+The Quality Indicators (QIs) are based on a Triple Collocation run with
+80% CI between ISMN (0-10 cm, "good" time stamps), ERA5-Land ("swvl1") and
+ESA CCI SM v06.1 PASSIVE. See ``./docs/ismn_frm.rst`` for more details.
+
 
 CGLS HR SSM SWI
 ===============

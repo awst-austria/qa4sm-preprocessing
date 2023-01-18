@@ -112,6 +112,7 @@ def write_transposed_dataset(
             print("Dask dashboard accessible at:", client.dashboard_link)
             _transpose(*args, **kwargs)
 
+    reader.close()
 
 def _transpose(
     reader: Reader,

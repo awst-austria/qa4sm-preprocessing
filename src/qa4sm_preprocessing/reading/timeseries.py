@@ -134,6 +134,7 @@ class _TimeseriesRepurposeMixin:
                 for gpi in cell_gpis:
                     ts = self.read(gpi, period=period)
                     io._write_gp(gpi, ts, attributes=attrs)
+            io.close()
             save_grid(outpath / "grid.nc", self.grid)
         else:  # pragma: no cover
             logging.info(f"Output path already exists: {str(outpath)}")

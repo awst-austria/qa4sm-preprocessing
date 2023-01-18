@@ -33,8 +33,10 @@ jobs:
           miniconda-version: "latest"
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
-          environment-file: ${{ matrix.ymlfile }}
+          mamba-version: "*"
+          channels: conda-forge,defaults
           activate-environment: qa4sm_preprocessing
+          environment-file: ${{ matrix.ymlfile }}
           auto-activate-base: false
       - name: Print environment infos
         shell: bash -l {0}

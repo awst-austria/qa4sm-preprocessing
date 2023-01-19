@@ -128,3 +128,9 @@ def test_dimension_orders(synthetic_test_args):
     assert reader.timename == "time"
     assert reader.get_dims() == expected_dims
     validate_reader(reader, ds)
+
+
+def test_small_cellsize(synthetic_test_args):
+    ds, kwargs = synthetic_test_args
+    reader = StackImageReader(ds, **kwargs, cellsize=0.01)
+    assert len(np.unique(reader.grid.activearrcell)) > 1

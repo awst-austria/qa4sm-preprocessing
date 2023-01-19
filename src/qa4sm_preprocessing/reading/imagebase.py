@@ -140,9 +140,7 @@ class ImageReaderBase(ReaderBase):
     @abstractmethod
     def _read_block(
         self, start: datetime.datetime, end: datetime.datetime
-    ) -> Dict[
-        str, Union[np.ndarray, dask.array.core.Array]
-    ]:  # pragma: no cover
+    ) -> Dict[str, Union[np.ndarray, dask.array.core.Array]]:  # pragma: no cover
         """
         Reads multiple images of a dataset as a numpy/dask array.
 
@@ -231,8 +229,7 @@ class ImageReaderBase(ReaderBase):
         coords = self.get_coords(times)
         dims = self.get_dims()
         arrays = {
-            name: (dims, data, array_attrs[name])
-            for name, data in block_dict.items()
+            name: (dims, data, array_attrs[name]) for name, data in block_dict.items()
         }
         block = xr.Dataset(arrays, coords=coords, attrs=self.global_attrs)
 
@@ -261,9 +258,7 @@ class ImageReaderBase(ReaderBase):
             )
         return block
 
-    def read(
-        self, timestamp: Union[datetime.datetime, str], **kwargs
-    ) -> Image:
+    def read(self, timestamp: Union[datetime.datetime, str], **kwargs) -> Image:
         """
         Read a single image at a given timestamp. Raises `ReaderError` if
         timestamp is not available in the dataset.
@@ -287,24 +282,27 @@ class ImageReaderBase(ReaderBase):
             timestamp = mkdate(timestamp)
 
         if timestamp not in self.timestamps:  # pragma: no cover
-            raise ReaderError(
-                f"Timestamp {timestamp} is not available in the dataset!"
-            )
+            raise ReaderError(f"Timestamp {timestamp} is not available in the dataset!")
 
-        img = self.read_block(
-            timestamp, timestamp, _apply_landmask_bbox=False
-        ).isel({self.timename: 0})
+        img = self.read_block(timestamp, timestamp, _apply_landmask_bbox=False).isel(
+            {self.timename: 0}
+        )
         img = self._stack(img)
+
+        if "parameter" in kwargs:
+            varnames = kwargs["parameter"]
+        else:
+            varnames = self.varnames
+
         data = {}
-        for varname in self.varnames:
+        for varname in varnames:
             var = img[varname].values
             if len(var) == len(self.grid.activegpis):
                 data[varname] = var
             else:
                 data[varname] = var[self.grid.activegpis]
-        metadata = {
-            varname: img[varname].attrs.copy() for varname in self.varnames
-        }
+        metadata = {varname: img[varname].attrs.copy() for varname in varnames}
+
         img = Image(
             self.grid.arrlon,
             self.grid.arrlat,
@@ -330,6 +328,7 @@ class ImageReaderBase(ReaderBase):
         end: Union[datetime.datetime, str] = None,
         overwrite: bool = False,
         memory: float = 2,
+        drop_crs: bool = True,
         **reader_kwargs,
     ):
         """
@@ -346,6 +345,11 @@ class ImageReaderBase(ReaderBase):
         overwrite: bool, optional (default: False)
             Whether to overwrite existing directories. If set to False, the
             function will return a reader for the existing directory.
+        drop_crs : bool, optional (default: True)
+            Some datasets have coordinate reference system info attached as a
+            string variable. During repurposing, this can strongly grow in
+            size. Therefore, by default, if a variable called "crs" is
+            encountered that has a string dtype, it is dropped.
         **reader_kwargs: additional keyword arguments for GriddedNcOrthoMultiTs
 
         Returns
@@ -357,12 +361,20 @@ class ImageReaderBase(ReaderBase):
         start, end = self._validate_start_end(start, end)
         if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
-        if not (
-            outpath / "grid.nc"
-        ).exists():  # if overwrite=True, it was deleted now
+        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
-            array_attrs = {v: testimg[v].attrs.copy() for v in self.varnames}
+
+            if (
+                drop_crs
+                and "crs" in self.varnames
+                and testimg.crs.dtype.type is np.string_
+            ):
+                varnames = [v for v in self.varnames if v != "crs"]
+            else:
+                varnames = self.varnames
+
+            array_attrs = {v: testimg[v].attrs.copy() for v in varnames}
             n = nimages_for_memory(testimg, memory)
             logging.info(f"Reading {n} images at once.")
             if hasattr(self, "use_tqdm"):  # pragma: no branch
@@ -373,9 +385,10 @@ class ImageReaderBase(ReaderBase):
                 str(outpath),
                 start,
                 end,
+                input_kwargs={"parameter": varnames},
+                ts_attributes=array_attrs,
                 cellsize_lat=self.cellsize,
                 cellsize_lon=self.cellsize,
-                ts_attributes=array_attrs,
                 global_attr=self.global_attrs,
                 zlib=True,
                 imgbuffer=n,

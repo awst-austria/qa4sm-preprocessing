@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import yaml
+import xarray as xr
 import zipfile
 
 from qa4sm_preprocessing.reading import (
@@ -15,6 +16,8 @@ from qa4sm_preprocessing.utils import (
     make_gridded_contiguous_ragged_dataset,
     preprocess_user_data,
 )
+
+from pytest import test_data_user_upload_path
 
 
 def make_test_timeseries(lats=[12, 34, 56], lons=[0.1, 2.3, 4.5]):
@@ -263,3 +266,14 @@ def test_contiguous_ragged_pipeline_only_ismn(test_output_path):
     np.testing.assert_equal(np.sort(grid.activearrlat), np.sort(close_lats))
     np.testing.assert_equal(np.sort(grid.activearrlon), np.sort(close_lons))
     np.testing.assert_equal(np.sort(grid.activegpis), np.sort(expected_gpis))
+
+
+def test_hr_cgls_preprocessing(test_output_path):
+    orig = xr.open_dataset(test_data_user_upload_path / "teststack_hr_cgls_small.nc")
+    assert "crs" in orig
+
+    reader = preprocess_user_data(
+        test_data_user_upload_path / "teststack_hr_cgls_small.nc",
+        test_output_path / "pynetcf"
+    )
+    assert "crs" not in reader.variable_description().keys()

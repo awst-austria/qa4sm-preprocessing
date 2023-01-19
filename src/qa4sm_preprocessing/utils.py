@@ -63,10 +63,10 @@ def make_csv_dataset(
 
     for gpi, (ts, lat, lon) in enumerate(zip(timeseries, lats, lons)):
         if grid is not None:
-            nearest_gpi, _ = grid.find_k_nearest_gpi(
+            nearest_gpi, dist = grid.find_k_nearest_gpi(
                 lon, lat, k=1, max_dist=radius * 1000
             )
-            if len(nearest_gpi) == 0:
+            if dist == np.inf:
                 continue
         write_timeseries(ts, gpi, lat, lon, name, outpath)
     if metadata is not None:
@@ -121,10 +121,10 @@ def make_gridded_contiguous_ragged_dataset(
         newgpis = []
         newts = []
         for gpi, (ts, lat, lon) in enumerate(zip(timeseries, lats, lons)):
-            nearest_gpi, _ = grid.find_k_nearest_gpi(
+            nearest_gpi, dist = grid.find_k_nearest_gpi(
                 lon, lat, k=1, max_dist=radius * 1000
             )
-            if len(nearest_gpi) == 0:
+            if dist == np.inf:
                 continue
             newlats.append(lat)
             newlons.append(lon)

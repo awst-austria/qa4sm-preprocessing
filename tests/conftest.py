@@ -16,6 +16,7 @@ here = Path(__file__).resolve().parent
 
 def pytest_configure():
     pytest.test_data_path = here / "test-data" / "preprocessing"
+    pytest.test_data_user_upload_path = here / "test-data" / "user_data"
 
 
 @pytest.fixture

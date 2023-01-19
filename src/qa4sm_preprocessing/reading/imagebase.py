@@ -303,17 +303,6 @@ class ImageReaderBase(ReaderBase):
                 data[varname] = var[self.grid.activegpis]
         metadata = {varname: img[varname].attrs.copy() for varname in varnames}
 
-        # # the crs variable can sometimes grow very large in size during
-        # # repurposing, so we might want to delete it
-        # if (
-        #     hasattr(self, "drop_crs")
-        #     and self.drop_crs
-        #     and "crs" in data
-        #     and data["crs"].dtype.type is np.string_
-        # ):
-        #     del data["crs"]
-        #     del metadata["crs"]
-
         img = Image(
             self.grid.arrlon,
             self.grid.arrlat,

@@ -634,11 +634,11 @@ class ZippedCsvTs(_GriddedNcContiguousRaggedTs, _TimeseriesRepurposeMixin):
             gpis[i] = gpi
             # mapping from gpi to index for  _read_gp
             self.gpi_index_map[gpi] = i
-            match = re.findall(r".*lat=([0-9.]+).*\.csv", name)
+            match = re.findall(r".*lat=([-0-9.]+).*\.csv", name)
             if len(match) != 1:
                 raise ReaderError(f"Extracting lat from filename {name} failed.")
             lats[i] = float(match[0])
-            match = re.findall(r".*lon=([0-9.]+).*\.csv", name)
+            match = re.findall(r".*lon=([-0-9.]+).*\.csv", name)
             if len(match) != 1:
                 raise ReaderError(f"Extracting lon from filename {name} failed.")
             lons[i] = float(match[0])

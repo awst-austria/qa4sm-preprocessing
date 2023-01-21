@@ -145,6 +145,7 @@ class FrmTcaQualification:
         self.classification = ds[vars].to_dataframe() \
                                       .rename(columns=rename) \
                                       .drop(columns=['lon', 'lat', 'idx'])
+        self.classification['variable'] = 'soil_moisture'
 
     def export(self):
         """
@@ -162,7 +163,7 @@ class FrmTcaQualification:
         df.to_csv(os.path.join(self.out_path, 'frm_classification.csv'),
                   index=False, sep=';')
 
-    def plot_bar(self) -> plt.Axes:
+    def plot_bar(self):
         """
         Create bar plot of QI classifications in out_path.
         """
@@ -184,7 +185,7 @@ class FrmTcaQualification:
 
         return ax
 
-    def plot_scatter(self, by='frm') -> plt.Axes:
+    def plot_scatter(self, by='frm'):
         """
         Create scatter plot of frm QI classification in out_path.
 

@@ -58,3 +58,5 @@ MANIFEST
 # example notebook output
 csv_soil_moisture
 pynectf_soil_moisture
+
+**/_local/*

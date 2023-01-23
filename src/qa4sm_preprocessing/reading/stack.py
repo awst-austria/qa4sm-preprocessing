@@ -127,6 +127,7 @@ class StackImageReader(ImageReaderBase):
         timeoffsetvarname=None,
         timeoffsetunit=None,
         rename: dict = None,
+        load: bool = True,
         **open_dataset_kwargs,
     ):
 
@@ -154,6 +155,8 @@ class StackImageReader(ImageReaderBase):
             construct_grid=construct_grid,
         )
         self.data = ds
+        if load:
+            self.data.load()
         self._timestamps = ds.indexes[self.timename].to_pydatetime()
         self.timeoffsetvarname = timeoffsetvarname
         self.timeoffsetunit = timeoffsetunit

@@ -2,7 +2,7 @@
 qa4sm-preprocessing
 ===================
 
-.. image:: https://github.com/awst-austria/qa4sm-preprocessing/workflows/Automated%20Tests/badge.svg?branch=master&event=push
+.. image:: https://github.com/awst-austria/qa4sm-preprocessing/workflows/Automated%20Tests/badge.svg?branch=master
    :target: https://github.com/awst-austria/qa4sm-preprocessing/actions
 
 .. image:: https://coveralls.io/repos/awst-austria/qa4sm-preprocessing/badge.png?branch=master

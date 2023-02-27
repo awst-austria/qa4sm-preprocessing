@@ -8,8 +8,9 @@ try:
     matplotlib.use("Qt5Agg")
     import matplotlib.pyplot as plt
     import seaborn as sns
-    _enable_plots = False
-except ImportError:
+    _enable_plots = True
+except ImportError as e:
+    print(f"Error during import.: {e}")
     _enable_plots = False
 
 import pandas as pd
@@ -290,3 +291,4 @@ def create_frm_csv_for_ismn(
         frm_qi.plot_scatter('frm')
 
     frm_qi.export()
+

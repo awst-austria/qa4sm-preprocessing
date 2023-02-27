@@ -1,13 +1,13 @@
 name: qa4sm_preprocessing
 channels:
-  - conda-forge
   - defaults
+  - conda-forge
 dependencies:
   - pandas
   - numpy
-  - defaults::xarray
+  - xarray
   - dask
-  - netcdf4
+  - netcdf4!=1.6.2
   - pyresample
   - pip
   - pip:

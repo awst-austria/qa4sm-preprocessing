@@ -82,6 +82,7 @@ class FrmTcaQualification:
         min_nobs=100,
         snr_thres=(0, 3),
         snr_ci_delta_thres=3,
+        include_other_vars=None,
     ):
         """
         Perform classification of ISMN sensors based on the given Triple
@@ -101,6 +102,10 @@ class FrmTcaQualification:
             Threshold for the delta of `SNR CI upper` and `SNR CI lower`.
             If the delta is larger the this value, the sensor is not
             considered to be representative.
+        include_other_vars: dict, optional (default: None)
+            Keys are variables in the input validation results netcdf file that
+            should be transferred into the output file. Values are the new names
+            in the output file.
         """
 
         ds = self.ds
@@ -134,7 +139,14 @@ class FrmTcaQualification:
         ds['frm_class'].values[mask_unrepr] = 'not representative'
 
         vars = ['frm_class', self.var_snr, self.var_nobs, 'criterion']
+
         rename = {self.var_snr: 'frm_snr', self.var_nobs: 'frm_nobs'}
+
+        if include_other_vars is not None:
+            vars.extend(list(include_other_vars.keys()))
+            rename.update(include_other_vars)
+        else:
+            include_other_vars = {}
 
         if self.var_depth_from:
             vars.append(self.var_depth_from)
@@ -143,10 +155,13 @@ class FrmTcaQualification:
             vars.append(self.var_depth_to)
             rename[self.var_depth_to] = 'depth_to'
 
+        drop = [c for c in ('lon', 'lat', 'idx')
+                if c not in include_other_vars.keys()]
+
+
         self.classification = ds[vars].to_dataframe() \
                                       .rename(columns=rename) \
-                                      .drop(columns=['lon', 'lat', 'idx'])
-        self.classification['variable'] = 'soil_moisture'
+                                      .drop(columns=drop)
 
     def export(self):
         """
@@ -159,7 +174,7 @@ class FrmTcaQualification:
         df = [self.classification.drop(columns=['criterion']),
               self.ds[cols].to_pandas()]
 
-        df = pd.concat(df, axis=1).drop(columns=['lat', 'lon', 'idx'])
+        df = pd.concat(df, axis=1)
 
         df.to_csv(os.path.join(self.out_path, 'frm_classification.csv'),
                   index=False, sep=';')
@@ -240,6 +255,7 @@ def create_frm_csv_for_ismn(
         var_nobs='n_obs',
         plot=False,
         out_path='/tmp',
+        include_other_vars=None,
 ):
     """
     Collect triple collocation results from QA4SM validation and compute
@@ -268,6 +284,10 @@ def create_frm_csv_for_ismn(
         Create plots.
     out_path: str, optional
         Path where the output csv file is stored.
+    include_other_vars: dict, optional (default: None)
+        Keys are variables in the input validation results netcdf file that
+        should be transferred into the output file. Values are the new names
+        in the output file.
     """
     frm_qi = FrmTcaQualification(
         tcol_val_result,
@@ -284,6 +304,7 @@ def create_frm_csv_for_ismn(
         min_nobs=100,
         snr_thres=(0, 3),
         snr_ci_delta_thres=3,
+        include_other_vars=include_other_vars,
     )
 
     if plot:
@@ -291,4 +312,3 @@ def create_frm_csv_for_ismn(
         frm_qi.plot_scatter('frm')
 
     frm_qi.export()
-

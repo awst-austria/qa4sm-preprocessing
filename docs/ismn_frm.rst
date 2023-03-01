@@ -21,9 +21,9 @@ based on the `SNR`, `CI`, and `nobs` metrics for a sensor::
     import os
     from qa4sm_preprocessing.ismn_frm.collect import create_frm_csv_for_ismn
 
-    ismn_data_path = "/home/wpreimes/shares/radar/Projects/FRM4SM/07_data/ismn_data/ISMN_v202301/"
+    ismn_data_path = "/home/wpreimes/shares/climers/Projects/FRM4SM/07_data/ismn_data/ISMN_v202301/"
     tcol_val_result = os.path.join(
-        ismn_data_path, "preprocessing", "frm_ tcol_80pCI_ismnG_ccip_era5",
+        ismn_data_path, "preprocessing", "tcol_80p_ci_tcol_ismnGv20230110_ccip_era5", "netcdf",
         "ismn_val_1980-01-01_TO_2022-12-31_in_0_TO_0_1.nc"
     )
 

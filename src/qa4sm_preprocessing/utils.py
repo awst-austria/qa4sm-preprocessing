@@ -182,7 +182,7 @@ def write_timeseries(
     ts.to_csv(path)
 
 
-def preprocess_user_data(uploaded, outpath, max_filesize=10):
+def preprocess_user_data(uploaded, outpath, max_filesize=30):
     """
     Preprocesses user-uploaded data to the format required for QA4SM.
 
@@ -210,7 +210,7 @@ def preprocess_user_data(uploaded, outpath, max_filesize=10):
         zfile = ZipFile(uploaded)
 
         # test if file size is not too big
-        filesize = sum(f.file_size for f in zfile.infolist()) / 1024 ** 3
+        filesize = sum(f.file_size for f in zfile.infolist()) / 1e9
         if filesize > max_filesize:
             raise ValueError(
                 f"Unpacked file size is too large: {filesize}GB."

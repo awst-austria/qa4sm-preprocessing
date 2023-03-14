@@ -2,6 +2,14 @@
 Changelog
 =========
 
+Unreleased
+==========
+-
+
+v0.2
+======
+- FRM4SM Release 2 version
+
 v0.1.4
 ======
 - new subpackage ismn_frm

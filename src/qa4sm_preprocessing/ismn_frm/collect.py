@@ -219,11 +219,16 @@ class FrmTcaQualification:
             raise ValueError("Create classification first.")
 
         if by.lower() == 'frm':
-            plt.figure()
-            ax = sns.scatterplot(x="frm_nobs", y="frm_snr", hue="frm_class",
-                                 data=self.classification)
+            fig, ax = plt.subplots(figsize=[7.22, 3.82])
+            ax.axhline(0, linewidth=1, color='k')
+
+            sns.scatterplot(x="frm_nobs", y="frm_snr", hue="FRM Class",
+                                 data=self.classification.rename(columns={'frm_class': 'FRM Class'}), ax=ax)
+
+            plt.ylabel('SNR [dB]')
+            plt.xlabel('# of observations')
             plt.tight_layout()
-            plt.savefig(os.path.join(self.out_path, 'qi_scatter_frm_class.png'))
+            plt.savefig(os.path.join(self.out_path, 'qi_scatter_frm_class.png'), dpi=300)
             return ax
         elif by.lower() == 'depth':
             plt.figure()
@@ -312,3 +317,59 @@ def create_frm_csv_for_ismn(
         frm_qi.plot_scatter('frm')
 
     frm_qi.export()
+
+
+if __name__ == '__main__':
+    path= "/home/wpreimes/shares/climers/Projects/FRM4SM/08_scratch/Validations/tcol_sat_tempref/bootstrap_tcol_80p_ci_10nobs/tcol_ismnG_ccip_era5_0_11cm/netcdf/ismn_val_1980-01-01_TO_2022-12-31_in_0_TO_0_11.nc"
+
+    create_frm_csv_for_ismn(
+        path,
+        var_snr='snr_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive',
+        var_ci_upper='snr_ci_upper_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive',
+        var_ci_lower = 'snr_ci_lower_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive',
+        var_depth_from='instrument_depthfrom_between_00-ISMN_and_01-ERA5_LAND',
+        var_depth_to='instrument_depthto_between_00-ISMN_and_01-ERA5_LAND',
+        var_nobs='n_obs',
+        plot=True,
+        out_path='/tmp',
+        include_other_vars={'err_std_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive': 'frm_scaled_err_std',
+                            'clay_fraction': 'clay_fraction',
+                            'sand_fraction': 'sand_fraction',
+                            'silt_fraction': 'silt_fraction',
+                            'climate_KG': 'climate_KG',
+                            'elevation': 'elevation',
+                            'organic_carbon': 'organic_carbon',
+                            'saturation':   'saturation',
+    }
+)
+
+    # import os
+    # import ismn
+    # if ismn.__version__ < "1.3.0":
+    #     raise NotImplementedError(
+    #         "Custom metadata readers are only available from "
+    #         "version 1.3.0 of ismn package onwards.")
+    # from ismn.interface import ISMN_Interface
+    # from ismn.custom import CustomSensorMetadataCsv
+    # import numpy as np
+    #
+    # qi_reader = CustomSensorMetadataCsv(
+    #     os.path.join("/tmp/frm_classification.csv"),
+    #     fill_values={'frm_class': 'undeducible', 'frm_snr': np.nan, 'frm_nobs': np.nan,
+    #                  'frm_scaled_err_std': np.nan,
+    #                  'clay_fraction': np.nan,
+    #                  'sand_fraction': np.nan,
+    #                  'silt_fraction': np.nan,
+    #                  'climate_KG': 'unknwown',
+    #                  'elevation': np.nan,
+    #                  'organic_carbon': np.nan,
+    #                  'saturation': np.nan,
+    #                  }
+    # )
+    #
+    # if os.path.exists(os.path.join(
+    #         ismn_data_path, 'extracted', 'python_metadata')):
+    #     raise ValueError("Metadata already exists, please delete it.")
+    #
+    # ds = ISMN_Interface(os.path.join(ismn_data_path, 'extracted'),
+    #                     custom_meta_reader=[qi_reader], parallel=True)

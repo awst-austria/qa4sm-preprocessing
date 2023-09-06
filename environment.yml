@@ -3,18 +3,20 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - pandas
+  - pandas<2
   - numpy
   - xarray
   - dask
-  - netcdf4!=1.6.2
+  - scipy
+  - netcdf4
   - pyresample
+  - pykdtree
   - pip
   - pip:
     - pygeobase
     - parse
     - pygeogrids>=0.4.0
-    - pynetcf
+    - pynetcf>=0.5.0
     - repurpose>=0.8
     - trollsift
     - pytest-cov

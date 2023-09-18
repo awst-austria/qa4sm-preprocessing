@@ -24,7 +24,7 @@ from pynetcf.time_series import GriddedNcOrthoMultiTs as _GriddedNcOrthoMultiTs
 from qa4sm_preprocessing.nc_image_reader.exceptions import ReaderError
 from qa4sm_preprocessing.nc_image_reader.utils import mkdate, infer_chunks
 
-ISEA_GRID_FILE = path_config = "/home/pstradio/Projects_data/QA4SM/SMOS/5deg_SMOSL2_grid.nc"
+ISEA_GRID_FILE = path_config = "/home/wpreimes/shares/exchange/staff/pstradio/wpreimes/5deg_SMOSL2_grid.nc"
 
 
 class ISEA4h9CellGrid:

@@ -3,7 +3,8 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - pandas
+  - python=3.8
+  - pandas==1.5.3
   - numpy
   - xarray
   - dask

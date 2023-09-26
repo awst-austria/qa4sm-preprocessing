@@ -7,7 +7,7 @@ from typing import Union, List, Tuple, Mapping
 from pygeogrids.netcdf import load_grid
 
 from qa4sm_preprocessing.reading.base import GridInfo
-from .base import L2Reader, _repurpose_level2_parse_cli_args
+from qa4sm_preprocessing.level2.base import L2Reader, _repurpose_level2_parse_cli_args
 
 
 _smos_gridfile = Path(__file__).parent / "5deg_SMOSL2_grid.nc"
@@ -109,4 +109,21 @@ def _repurpose_smosl2_cli():
         end=args.end,
         overwrite=args.overwrite,
         memory=args.memory,
+    )
+
+
+if __name__ == '__main__':
+    from datetime import datetime
+    path = "/home/wolfgang/data-read/temp/smos_sbpca/l2/images/"
+    parameters = ['Chi_2_P', 'Days', 'M_AVA0', 'N_RFI_X', 'N_RFI_Y', 'RFI_Prob',
+                  'Science_Flags', 'Seconds', 'Soil_Moisture']
+
+    reader = SMOSL2Reader(path, parameters)
+    grid = load_grid("5deg_SMOSL2_grid.nc")
+    reader.repurpose(
+        "/home/wolfgang/data-read/temp/smos_sbpca/l2/ts/",
+        start=datetime(2012,1,2),
+        end=datetime(2012,1,3),
+        overwrite=True,
+        memory=2,
     )

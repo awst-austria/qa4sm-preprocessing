@@ -184,3 +184,4 @@ dependencies:
       - tqdm==4.66.1
       - trollsift==0.5.0
       - zarr==2.16.1
+      - sphinx_rtd_theme

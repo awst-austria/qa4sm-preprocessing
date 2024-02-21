@@ -5,8 +5,18 @@ Processing SMOS L2 swath data to time series
 
 The smos module is used to convert L2 swath files (also SBPCA) to time series.
 
-1) Download SMOS L2 swath files (.zip)
-2) Download the SMOS Netcdf conversion tool and convert the data to netcdf
+Download SMOS L2 swath files
+----------------------------
+
+For the SBPCA data use the following FTP (requires access from ESA): ``dpgsrftpserver.smos.eo.esa.int``
+
+For L2 SM use the following FTP (requires an `account <https://earth.esa.int/eogateway/catalog/smos-science-products>`_):
+``smos-diss.eo.esa.int``
+
+Convert ZIP to netcdf
+---------------------
+This is **only relevant for SBPCA data**.
+Download the SMOS Netcdf conversion tool and convert the data to netcdf.
 
 .. code-block:: shell
 
@@ -22,8 +32,10 @@ The smos module is used to convert L2 swath files (also SBPCA) to time series.
       bash .../smos-ee-to-nc.sh $file --target-directory $outpath --overwrite-target
     done
 
-3) Use the `SMOSL2Reader` from this package and call the resampling routine.
-Add the overpass flag so we can filter asc and desc. orbits.
+Convert Swath data to time series
+---------------------------------
+Use the `SMOSL2Reader` from this package and call the resampling routine.
+Add the overpass flag so we can filter for asc and desc. orbits.
 
 .. code-block:: python
 

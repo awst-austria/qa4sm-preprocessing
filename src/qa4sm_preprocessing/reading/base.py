@@ -38,6 +38,7 @@ class ReaderBase:
         cellsize: float = None,
         gridtype: str = "infer",
         construct_grid: bool = True,
+        add_attrs: dict = None,
     ):
         # Notes:
         # The DirectoryImageReader base class calls this constructur with a
@@ -106,6 +107,7 @@ class ReaderBase:
         else:
             self.grid = None
 
+        self.add_attrs = add_attrs or dict()
         # infer metadata last, because opening the dataset might only work
         # correctly if the grid is already set
         self.global_attrs, self.array_attrs = self._metadata_from_dataset(ds)
@@ -123,7 +125,15 @@ class ReaderBase:
         self, ds: xr.Dataset
     ) -> Tuple[Mapping, Mapping]:
         global_attrs = dict(ds.attrs)
-        array_attrs = {v: dict(ds[v].attrs) for v in self.varnames}
+        array_attrs = {}
+        for v in self.varnames:
+            if v in ds:
+                array_attrs[v] = dict(ds[v].attrs)
+            elif v in self.add_attrs:
+                array_attrs[v]  = dict(self.add_attrs[v])
+            else:
+                raise KeyError(f"Not attributes for variable {v} found.")
+
         return global_attrs, array_attrs
 
     def _shape_from_dataset(self, ds: xr.Dataset) -> Tuple:

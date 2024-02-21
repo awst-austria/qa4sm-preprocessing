@@ -16,10 +16,11 @@ dependencies:
     - parse
     - pygeogrids>=0.4.0
     - pynetcf
-    - repurpose>=0.8
+    - git+https://github.com/TUW-GEO/repurpose@c6112e2ef870041f4f2cfe9a77d4db25fb206d56
     - trollsift
     - pytest-cov
     - pytest
     - matplotlib
     - zarr
     - tqdm
+    - cf_xarray

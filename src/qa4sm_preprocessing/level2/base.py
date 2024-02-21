@@ -50,6 +50,8 @@ class L2Reader(DirectoryImageReader):
         this extension are used. If another pattern should be used and the
         files are in nested directories, it should probably follow this format:
         ``"**/<pattern>"``.
+    add_attrs : dict, optional (default: None)
+        Additional variable attributes that cannot be taken from the input data.
     """
 
     @abstractmethod
@@ -113,6 +115,7 @@ class L2Reader(DirectoryImageReader):
         varnames: List[str],
         fmt="%Y%m%dT%H%M%S",
         pattern=None,
+        add_attrs=None,
     ):
         gridinfo = self._gridinfo()
         self.gridshape = gridinfo.shape
@@ -126,6 +129,7 @@ class L2Reader(DirectoryImageReader):
             fmt=fmt,
             time_regex_pattern=time_regex_pattern,
             pattern=pattern,
+            add_attrs=add_attrs,
         )
 
     def _read_file(self, fname) -> Mapping[str, np.ndarray]:
@@ -153,7 +157,7 @@ class L2Reader(DirectoryImageReader):
     def _metadata_from_dataset(self, fname: Union[Path, str]) -> Tuple[dict, dict]:
         global_attrs = self._global_metadata(fname)
         array_attrs = self._variable_metadata(fname)
-        return global_attrs, {v: array_attrs[v] for v in self.varnames}
+        return global_attrs, array_attrs #{v: array_attrs[v] for v in self.varnames}
 
     def _dtype_from_dataset(self, fname: Union[Path, str]) -> Mapping:
         # can also be overriden if the datatypes are known beforehand

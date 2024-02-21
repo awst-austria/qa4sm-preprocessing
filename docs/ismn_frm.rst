@@ -3,7 +3,10 @@ FRM ISMN Qualification from TCA
 
 .. _ismn_frm:
 
-This module handles creating the FRM qualifications. It uses a triple collocation
+This module contains the routine to assign FRM qualifications ISMN sensors.
+The Quality Indicators (QIs) are based on a Triple Collocation run with
+80% CI between ISMN (0-10 cm, "good" time stamps), ERA5-Land ("swvl1") and
+ESA CCI SM v06.1 PASSIVE. It uses a triple collocation
 validation for all ISMN sensors in 0-10 cm depth from all available networks with
 ERA5-Land and ESA CCI SM v06.1 PASSIVE.
 

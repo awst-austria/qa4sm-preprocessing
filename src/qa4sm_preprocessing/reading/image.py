@@ -416,6 +416,9 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         ``[pd.Timedelta("6H"), pd.Timedelta("12H")]
     use_tqdm : bool, optional (default: True)
         Whether you want to have a nice progressbar.
+    add_attrs: dict, optional (default: None)
+        Additional variable attributes that cannot be taken from the input data.
+        {varname: {attr: val, ...}, ...}
     **open_dataset_kwargs : keyword arguments
        Additional keyword arguments passed to ``xr.open_dataset``.
     """
@@ -452,6 +455,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
         timestamps: Sequence[pd.Timedelta] = None,
         use_tqdm: bool = True,
         use_dask: bool = False,
+        add_attrs: dict = None,
         **open_dataset_kwargs,
     ):
 
@@ -505,6 +509,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
             landmask=landmask,
             bbox=bbox,
             cellsize=cellsize,
+            add_attrs=add_attrs,
         )
 
         ######################################################################

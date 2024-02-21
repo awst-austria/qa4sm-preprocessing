@@ -11,41 +11,19 @@ qa4sm-preprocessing
 .. image:: https://badge.fury.io/py/qa4sm-preprocessing.svg
     :target: https://badge.fury.io/py/qa4sm-preprocessing
 
+.. image:: https://readthedocs.org/projects/qa4sm-preprocessing/badge/?version=latest
+   :target: http://qa4sm-preprocessing.readthedocs.org/
+
+The full documentation is available at https://qa4sm-preprocessing.readthedocs.io
 
 This package contains functions to preprocess certain data before using them
 in the QA4SM online validation framework.
 
-ISMN FRM
-========
+Find the following examples as ipython notebooks under `docs/examples`
 
-This module contains the routine to assign FRM qualifications ISMN sensors.
-The Quality Indicators (QIs) are based on a Triple Collocation run with
-80% CI between ISMN (0-10 cm, "good" time stamps), ERA5-Land ("swvl1") and
-ESA CCI SM v06.1 PASSIVE. See ``./docs/ismn_frm.rst`` for more details.
-
-
-CGLS HR SSM SWI
-===============
-
-Read CGLS HR SSM and SWI images (1km sampling) in netcdf format and convert
-them to time series.
-The image reader allows reading/converting data for a spatial subset (bbox) only.
-Time series are stored in 5*5 DEG cell files, i.e. there are `~250 000 time series`
-stored in one single cell file.
-
-Time series reading is done based on cell level. Up to 6 cells are loaded into
-memory at a time. The ``read_area`` function allows reading multiple GPI time series
-around one location at once (and optionally converting them into a single, averaged
-series, to represent the mean SM for an area).
-
-Necessary updates
------------------
-At the moment it is only possible to read a single variable. However, in order
-to mask SM time series based in location quality flags, it is necessary to
-read multiple parameters. When passing the averaged time series for an area
-to `pytesmo` for validation, masking can not be done in `pytesmo`, but must be done
-beforehand.
-
+- Example 1: `Custom time series upload <https://github.com/awst-austria/qa4sm-preprocessing/blob/master/docs/examples/timeseries_user_upload.ipynb>`_
+- Example 2: `Images to Time series conversion <https://github.com/awst-austria/qa4sm-preprocessing/blob/master/docs/examples/images_to_timeseries.ipynb>`_
+- Example 3: `Spatial Averaging <https://github.com/awst-austria/qa4sm-preprocessing/blob/master/docs/examples/spatial_averaging.ipynb>`_
 
 .. _pyscaffold-notes:
 

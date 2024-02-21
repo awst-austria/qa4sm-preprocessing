@@ -12,7 +12,7 @@ def test_SMOSL2(test_output_path):
 
     outpath = test_output_path / "SMOS_L2_ts"
 
-    reader = SMOSL2Reader(test_data_path / "SMOS_L2")
+    reader = SMOSL2Reader(test_data_path / "SMOS_L2", add_overpass_flag=True)
 
     # test reader
     data = reader.read_block()
@@ -21,6 +21,7 @@ def test_SMOSL2(test_output_path):
         "Soil_Moisture_DQX",
         "Science_Flags",
         "Confidence_Flags",
+        "Overpass",
         "Processing_Flags",
         "Chi_2",
         "RFI_Prob",
@@ -50,6 +51,8 @@ def test_SMOSL2(test_output_path):
     idx = np.where(np.isfinite(data.Soil_Moisture))[1][0]
     gpi = reader.grid.activegpis[idx]
     ts = tsreader.read(gpi)
+    assert 'Overpass' in ts.columns
+    assert np.all(np.isin(np.unique(ts['Overpass'].values), [0, 1, 2]))
     assert len(ts) == 2
     assert ts.index[0] == pd.Timestamp("2010-06-01 08:18:35")
     np.testing.assert_almost_equal(

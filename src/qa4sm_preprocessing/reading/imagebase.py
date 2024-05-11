@@ -11,6 +11,7 @@ import xarray as xr
 
 from pygeobase.object_base import Image
 from repurpose.img2ts import Img2Ts
+from repurpose.process import ImageBaseConnection
 
 from .exceptions import ReaderError
 from .utils import mkdate, nimages_for_memory, numpy_timeoffsetunit
@@ -309,7 +310,9 @@ class ImageReaderBase(ReaderBase):
             data,
             metadata,
             timestamp,
+            timekey=self.timekey
         )
+
         return img
 
     def _testimg(self):
@@ -329,6 +332,11 @@ class ImageReaderBase(ReaderBase):
         overwrite: bool = False,
         memory: float = 2,
         drop_crs: bool = True,
+        n_proc=1,
+        cellsize=None,
+        target_grid=None,
+        img2ts_kwargs=None,
+        imgbaseconnection=False,
         **reader_kwargs,
     ):
         """
@@ -350,6 +358,15 @@ class ImageReaderBase(ReaderBase):
             string variable. During repurposing, this can strongly grow in
             size. Therefore, by default, if a variable called "crs" is
             encountered that has a string dtype, it is dropped.
+        cellsize: float, optional (default: None)
+            Size of the cells to split time series into (affects the file size).
+            If None, then automatically determined cellsize is used.
+        n_proc: int, optional (default: 1)
+            Number of parallel processes to use
+        target_grid: Cellgrid, optional (default: None)
+            To process a spatial subset pass a subgrid of the image grid
+            here.
+        **img2ts_kwargs: additional keyword arguments to pass to Img2Ts
         **reader_kwargs: additional keyword arguments for GriddedNcOrthoMultiTs
 
         Returns
@@ -380,18 +397,27 @@ class ImageReaderBase(ReaderBase):
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
+
+            # self.path = self.directory
+
+            if img2ts_kwargs is None:
+                img2ts_kwargs = dict()
+
             reshuffler = Img2Ts(
-                self,
+                ImageBaseConnection(self) if imgbaseconnection else self,
                 str(outpath),
                 start,
                 end,
+                target_grid=target_grid,
                 input_kwargs={"parameter": varnames},
                 ts_attributes=array_attrs,
-                cellsize_lat=self.cellsize,
-                cellsize_lon=self.cellsize,
+                cellsize_lat=self.cellsize if cellsize is None else cellsize,
+                cellsize_lon=self.cellsize if cellsize is None else cellsize,
                 global_attr=self.global_attrs,
                 zlib=True,
                 imgbuffer=n,
+                n_proc=n_proc,
+                **img2ts_kwargs
             )
             reshuffler.calc()
             if hasattr(self, "use_tqdm"):  # pragma: no branch

@@ -162,6 +162,7 @@ class FrmTcaQualification:
         self.classification = ds[vars].to_dataframe() \
                                       .rename(columns=rename) \
                                       .drop(columns=drop)
+        self.classification['variable'] = 'soil_moisture'
 
     def export(self):
         """
@@ -312,3 +313,22 @@ def create_frm_csv_for_ismn(
         frm_qi.plot_scatter('frm')
 
     frm_qi.export()
+
+if __name__ == '__main__':
+    import os
+    from qa4sm_preprocessing.ismn_frm.collect import create_frm_csv_for_ismn
+
+    ismn_data_path = "/data-read/USERS/wpreimes/ISMN/FullArchive_20240314"
+    tcol_val_result = "/home/wpreimes/shares/climers/Projects/FRM4SM/08_scratch/Validations/ismn_v20240314_tcol_for_frms/netcdf/ismn_val_1980-01-01_TO_2023-12-31_in_0_TO_0_11.nc"
+
+    create_frm_csv_for_ismn(
+        tcol_val_result,
+        var_snr='snr_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive',
+        var_ci_upper='snr_ci_upper_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive',
+        var_ci_lower='snr_ci_lower_00-ISMN_between_00-ISMN_and_01-ERA5_LAND_and_02-ESA_CCI_SM_passive',
+        var_depth_from='instrument_depthfrom_between_00-ISMN_and_01-ERA5_LAND',
+        var_depth_to='instrument_depthto_between_00-ISMN_and_01-ERA5_LAND',
+        var_nobs='n_obs',
+        plot=False,
+        out_path="/home/wpreimes/shares/climers/Projects/FRM4SM/08_scratch/Validations/ismn_v20240314_tcol_for_frms",
+    )

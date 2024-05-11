@@ -39,6 +39,7 @@ class ReaderBase:
         gridtype: str = "infer",
         construct_grid: bool = True,
         add_attrs: dict = None,
+        timekey: str = None,
     ):
         # Notes:
         # The DirectoryImageReader base class calls this constructur with a
@@ -75,6 +76,7 @@ class ReaderBase:
         self.ydim = ydim
         self.xdim = xdim
         self.locdim = locdim
+        self.timekey = timekey
 
         # infer the coordinates and grid
         if lat is not None or lon is not None:

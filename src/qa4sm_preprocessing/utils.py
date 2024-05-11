@@ -270,3 +270,8 @@ def ismn_grid():
     """
     gridfile = Path(__file__).parent / "ismn_grid.nc"
     return load_grid(gridfile)
+
+
+if __name__ == '__main__':
+    preprocess_user_data("/tmp/test/ascat.zip",
+                         "/tmp")

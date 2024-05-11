@@ -53,8 +53,10 @@ class SMOSL2Reader(L2Reader):
             warnings.warn("`acquisition_time` will be included automatically.")
             varnames.append('acquisition_time')
 
+
         if add_overpass_flag:
-            add_attrs = {'Overpass': {'flag_masks': [1, 2], 'flag_meanings': ['Ascending' 'Descending']}}
+            add_attrs = {'Overpass': {'flag_masks': [1, 2],
+                                      'flag_meanings': ['Ascending' 'Descending']}}
         else:
             add_attrs = None
 
@@ -64,9 +66,16 @@ class SMOSL2Reader(L2Reader):
             add_attrs=add_attrs,
         )
 
+        self.timekey = "acquisition_time"
+
     @property
     def _time_regex_pattern(self):
-        return r"SM_REPR_MIR_SMUDP2_([0-9T]+)_.*.nc"
+        return r"SM(?:_[A-Z]{4})?_MIR_SMUDP2_([0-9T]+)_.*.nc"
+
+    def _build_filename(self, timestamp) -> str:
+        filenames = list(self.blockreader.get_file_tstamp_map(np.atleast_1d(timestamp)).keys())
+        assert len(filenames) == 1, "Got multiple filenames for time stamp"
+        return filenames[0]
 
     def _gridinfo(self):
         grid = load_grid(_smos_gridfile)
@@ -80,16 +89,16 @@ class SMOSL2Reader(L2Reader):
         # datatype, because otherwise the fill values will lead to type conversion
         ds = xr.open_dataset(fname, decode_cf=False, mask_and_scale=False)
 
-        # get acquisition time from undecoded
+    # get acquisition time from undecoded
         acq_time = (
             ds.Days.astype("timedelta64[D]") + ds.Seconds.astype("timedelta64[s]")
         ).values
+
         # set zeros to NaN
         seconds_since_2000 = acq_time.astype("timedelta64[s]").astype(float)
         # convert to seconds as float
         seconds_since_2000[seconds_since_2000 == 0] = np.nan
         data["acquisition_time"] = seconds_since_2000
-
 
         # now we decode and then convert back to the original types
         ds = xr.decode_cf(ds)
@@ -187,3 +196,9 @@ class SBPCAReader(GriddedNcOrthoMultiTs):
             if 'acquisition_time' in ts.columns:
                 ts = ts.dropna(subset='acquisition_time')
         return ts
+
+
+if __name__ == '__main__':
+    old = SBPCAReader("/home/wpreimes/shares/climers/Projects/QA4SM_HR/07_data/SERVICE_DATA/SMOS_L2/SMOSL2_v700")
+    ts_old = old.read(18, 48)
+    #reader = SBPCAReader("/home/wpreimes/shares/climers/Projects/QA4SM_HR/07_data/SERVICE_DATA/SMOS_SBPCA/SMOS_SBPCA_v724")

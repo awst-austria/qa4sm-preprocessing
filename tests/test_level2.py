@@ -6,7 +6,6 @@ from qa4sm_preprocessing.level2 import SMAPL2Reader, SMOSL2Reader
 
 from pytest import test_data_path
 
-
 @pytest.mark.slow
 def test_SMOSL2(test_output_path):
 
@@ -46,7 +45,7 @@ def test_SMOSL2(test_output_path):
         assert str(t.astype("datetime64[D]")) == "2010-06-01"
 
     # test repurpose
-    tsreader = reader.repurpose(outpath, overwrite=True)
+    tsreader = reader.repurpose(outpath, overwrite=True, n_proc=4,)
 
     idx = np.where(np.isfinite(data.Soil_Moisture))[1][0]
     gpi = reader.grid.activegpis[idx]
@@ -110,3 +109,9 @@ def test_SMAPL2(test_output_path):
     )
     # acquisition_time should not be in the columns anymore
     assert sorted(list(ts.columns)) == sorted(expected_varnames[:-1])
+
+if __name__ == '__main__':
+    import tempfile
+    from conftest import *
+    with tempfile.TemporaryDirectory() as tmp:
+        test_SMOSL2(tmp)

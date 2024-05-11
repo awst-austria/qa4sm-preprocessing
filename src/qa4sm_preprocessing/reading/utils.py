@@ -91,4 +91,6 @@ def infer_cellsize(grid):
     deltalon = np.max(grid.activearrlon) - np.min(grid.activearrlon)
     cellsize = 30 * np.sqrt(deltalat * deltalon / len(grid.activegpis))
     logging.info(f"Inferred cell size for cell grid: {cellsize:.3f}°")
+    if cellsize == 0. :
+        cellsize = 180
     return cellsize

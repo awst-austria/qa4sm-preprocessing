@@ -470,6 +470,7 @@ class DirectoryImageReader(LevelSelectionMixin, ImageReaderBase):
                 f"No files matching pattern {pattern} in directory "
                 f"{str(directory)}."
             )
+        self.directory = directory
         self._example_file = filepaths[0]
         self.fmt = fmt
         if time_regex_pattern is not None:

@@ -17,6 +17,8 @@ from .exceptions import ReaderError
 from .utils import mkdate, nimages_for_memory, numpy_timeoffsetunit
 from .base import ReaderBase
 from .timeseries import GriddedNcOrthoMultiTs
+from pynetcf.time_series import GriddedNcIndexedRaggedTs
+from pygeogrids.netcdf import load_grid
 
 
 class ImageReaderBase(ReaderBase):
@@ -371,8 +373,9 @@ class ImageReaderBase(ReaderBase):
 
         Returns
         -------
-        reader : GriddedNcOrthoMultiTs
-            Reader for the timeseries files.
+        reader : GriddedNcOrthoMultiTs or GriddedNcIndexedRaggedTs or None
+            Reader for the timeseries files or None if no reshuffling was
+            performed
         """
         outpath = Path(outpath)
         start, end = self._validate_start_end(start, end)
@@ -392,22 +395,38 @@ class ImageReaderBase(ReaderBase):
                 varnames = self.varnames
 
             array_attrs = {v: testimg[v].attrs.copy() for v in varnames}
+
+            time_units = None
+            if self.timekey in array_attrs:
+                time_attrs = array_attrs.pop(self.timekey)
+                if 'units' in time_attrs:
+                    time_units = time_attrs['units']
+
+            img2ts_kwargs = img2ts_kwargs or dict()
+            if time_units is not None:
+                img2ts_kwargs['time_units'] = time_units
+
             n = nimages_for_memory(testimg, memory)
             logging.info(f"Reading {n} images at once.")
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 orig_tqdm = self.use_tqdm
                 self.use_tqdm = False
 
-            # self.path = self.directory
-
             if img2ts_kwargs is None:
                 img2ts_kwargs = dict()
 
+            if imgbaseconnection:
+                reader = ImageBaseConnection(self, attr_read='read',
+                                             attr_path='directory')
+            else:
+                reader = self
+
             reshuffler = Img2Ts(
-                ImageBaseConnection(self) if imgbaseconnection else self,
+                reader,
                 str(outpath),
                 start,
                 end,
+                input_grid=self.grid,
                 target_grid=target_grid,
                 input_kwargs={"parameter": varnames},
                 ts_attributes=array_attrs,
@@ -423,7 +442,18 @@ class ImageReaderBase(ReaderBase):
             if hasattr(self, "use_tqdm"):  # pragma: no branch
                 self.use_tqdm = orig_tqdm
         else:
+            reshuffler = None
             logging.info(f"Output path already exists: {str(outpath)}")
 
-        reader = GriddedNcOrthoMultiTs(str(outpath), **reader_kwargs)
+        if reshuffler is not None:
+            if reshuffler.orthogonal:
+                reader = GriddedNcOrthoMultiTs(str(outpath), **reader_kwargs)
+
+            else:
+                grid = load_grid(str(outpath / 'grid.nc'))
+                reader = GriddedNcIndexedRaggedTs(str(outpath), grid=grid,
+                                                  **reader_kwargs)
+        else:
+            reader = None
+
         return reader

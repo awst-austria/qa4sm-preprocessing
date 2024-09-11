@@ -6,6 +6,7 @@ import xarray as xr
 from qa4sm_preprocessing.reading import (
     DirectoryImageReader,
     StackImageReader,
+    GriddedNcOrthoMultiTs
 )
 from qa4sm_preprocessing.reading.utils import mkdate
 
@@ -209,7 +210,8 @@ def test_SMOS(test_output_path):
     )
 
     outpath = test_output_path / "SMOS_ts"
-    ts_reader = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
+    _ = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
+    ts_reader = GriddedNcOrthoMultiTs(str(outpath), timevarname="Mean_Acq_Time")
 
     def validate(ts_reader):
         df = ts_reader.read(ts_reader.grid.activegpis[100])
@@ -231,9 +233,11 @@ def test_SMOS(test_output_path):
     validate(ts_reader)
 
     # test overwriting again with an existing directory
-    ts_reader = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
+    _ = reader.repurpose(outpath, overwrite=True, timevarname="Mean_Acq_Time")
+    ts_reader = GriddedNcOrthoMultiTs(str(outpath), timevarname="Mean_Acq_Time")
     validate(ts_reader)
 
     # test reading without overwriting
-    ts_reader = reader.repurpose(outpath, overwrite=False, timevarname="Mean_Acq_Time")
+    _ = reader.repurpose(outpath, overwrite=False, timevarname="Mean_Acq_Time")
+    ts_reader = GriddedNcOrthoMultiTs(str(outpath), timevarname="Mean_Acq_Time")
     validate(ts_reader)

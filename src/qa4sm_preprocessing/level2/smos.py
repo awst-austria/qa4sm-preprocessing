@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Union, List, Tuple, Mapping
 import warnings
 import pandas as pd
+from datetime import datetime
 
 from pygeogrids.netcdf import load_grid
 from qa4sm_preprocessing.reading import GriddedNcOrthoMultiTs
@@ -161,7 +162,7 @@ class SMOSL2Reader(L2Reader):
         }
 
     def repurpose(self, *args, **kwargs):
-        return super().repurpose(*args, **kwargs, timevarname="acquisition_time")
+        return super().repurpose(*args, **kwargs)
 
 
 def _repurpose_smosl2_cli():
@@ -196,9 +197,3 @@ class SBPCAReader(GriddedNcOrthoMultiTs):
             if 'acquisition_time' in ts.columns:
                 ts = ts.dropna(subset='acquisition_time')
         return ts
-
-
-if __name__ == '__main__':
-    old = SBPCAReader("/home/wpreimes/shares/climers/Projects/QA4SM_HR/07_data/SERVICE_DATA/SMOS_L2/SMOSL2_v700")
-    ts_old = old.read(18, 48)
-    #reader = SBPCAReader("/home/wpreimes/shares/climers/Projects/QA4SM_HR/07_data/SERVICE_DATA/SMOS_SBPCA/SMOS_SBPCA_v724")

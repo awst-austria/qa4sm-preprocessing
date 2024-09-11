@@ -71,7 +71,8 @@ def test_repurpose_lis(cli_args_lis, lis_noahmp_stacked):
     for gpi in reader.grid.activegpis:
         ts = reader.read(gpi)
         ref_ts = ref.read(gpi)
-        np.testing.assert_almost_equal(ts["SoilMoist_inst"].values, ref_ts["SoilMoist_inst"].values)
+        np.testing.assert_almost_equal(ts["SoilMoist_inst"].values,
+                                       ref_ts["SoilMoist_inst"].values)
 
 
 @pytest.fixture

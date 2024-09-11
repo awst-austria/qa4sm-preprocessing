@@ -7,8 +7,9 @@ from pynetcf.time_series import GriddedNcIndexedRaggedTs
 
 from qa4sm_preprocessing.level2 import SMAPL2Reader, SMOSL2Reader
 
-#from pytest import test_data_path
-test_data_path = Path('/shares/wpreimes/home/code/qa4sm-preprocessing/tests/test-data/preprocessing')
+from pytest import test_data_path
+
+
 @pytest.mark.slow
 def test_SMOSL2(test_output_path):
 

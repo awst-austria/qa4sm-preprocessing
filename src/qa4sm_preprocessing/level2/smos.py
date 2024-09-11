@@ -4,14 +4,12 @@ import numpy as np
 from pathlib import Path
 from typing import Union, List, Tuple, Mapping
 import warnings
-import pandas as pd
-from datetime import datetime
 
 from pygeogrids.netcdf import load_grid
-from qa4sm_preprocessing.reading import GriddedNcOrthoMultiTs
 
 from qa4sm_preprocessing.reading.base import GridInfo
 from qa4sm_preprocessing.level2.base import L2Reader, _repurpose_level2_parse_cli_args
+
 
 
 _smos_gridfile = Path(__file__).parent / "5deg_SMOSL2_grid.nc"
@@ -180,20 +178,3 @@ def _repurpose_smosl2_cli():
         overwrite=args.overwrite,
         memory=args.memory,
     )
-
-class SBPCAReader(GriddedNcOrthoMultiTs):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-    def read(self, *args, **kwargs) -> pd.DataFrame:
-        ts = super(SBPCAReader, self).read(*args, **kwargs)
-        if (ts is not None) and not ts.empty:
-            ts = ts[ts.index.notnull()]
-            for col in ['Chi_2_P', 'M_AVA0', 'N_RFI_X', 'N_RFI_Y', 'RFI_Prob',
-                        'Science_Flags']:
-                if col in ts.columns:
-                    ts[col] = ts[col].fillna(0)
-            if 'Soil_Moisture' in ts.columns:
-                ts = ts.dropna(subset='Soil_Moisture')
-            if 'acquisition_time' in ts.columns:
-                ts = ts.dropna(subset='acquisition_time')
-        return ts

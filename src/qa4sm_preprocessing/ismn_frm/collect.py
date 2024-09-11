@@ -162,6 +162,7 @@ class FrmTcaQualification:
         self.classification = ds[vars].to_dataframe() \
                                       .rename(columns=rename) \
                                       .drop(columns=drop)
+        self.classification['variable'] = 'soil_moisture'
 
     def export(self):
         """

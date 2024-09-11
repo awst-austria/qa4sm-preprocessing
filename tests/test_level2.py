@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import pytest
+from pathlib import Path
+from pygeogrids.netcdf import load_grid
+from pynetcf.time_series import GriddedNcIndexedRaggedTs
 
 from qa4sm_preprocessing.level2 import SMAPL2Reader, SMOSL2Reader
 
@@ -12,7 +15,7 @@ def test_SMOSL2(test_output_path):
 
     outpath = test_output_path / "SMOS_L2_ts"
 
-    reader = SMOSL2Reader(test_data_path / "SMOS_L2")
+    reader = SMOSL2Reader(test_data_path / "SMOS_L2", add_overpass_flag=True)
 
     # test reader
     data = reader.read_block()
@@ -21,6 +24,7 @@ def test_SMOSL2(test_output_path):
         "Soil_Moisture_DQX",
         "Science_Flags",
         "Confidence_Flags",
+        "Overpass",
         "Processing_Flags",
         "Chi_2",
         "RFI_Prob",
@@ -45,16 +49,23 @@ def test_SMOSL2(test_output_path):
         assert str(t.astype("datetime64[D]")) == "2010-06-01"
 
     # test repurpose
-    tsreader = reader.repurpose(outpath, overwrite=True)
+    reader.repurpose(outpath, overwrite=True, n_proc=4,)
+
+    grid = load_grid(str(outpath / 'grid.nc'))
+    tsreader = GriddedNcIndexedRaggedTs(str(outpath), grid=grid)
 
     idx = np.where(np.isfinite(data.Soil_Moisture))[1][0]
     gpi = reader.grid.activegpis[idx]
     ts = tsreader.read(gpi)
-    assert len(ts) == 2
+    assert 'Overpass' in ts.columns
+    assert np.all(np.isin(np.unique(ts['Overpass'].values), [0, 1, 2]))
+
+    should = data.isel(loc=idx).to_dataframe()[['Soil_Moisture', 'acquisition_time']].dropna()
+
+    assert len(ts) == len(should)
     assert ts.index[0] == pd.Timestamp("2010-06-01 08:18:35")
     np.testing.assert_almost_equal(
-        ts.Soil_Moisture.values,
-        data.isel(loc=idx).to_dataframe().Soil_Moisture.values
+        ts.Soil_Moisture.values, should.Soil_Moisture.values
     )
     # acquisition_time should not be in the columns anymore
     assert sorted(list(ts.columns)) == sorted(expected_varnames[:-1])
@@ -107,3 +118,9 @@ def test_SMAPL2(test_output_path):
     )
     # acquisition_time should not be in the columns anymore
     assert sorted(list(ts.columns)) == sorted(expected_varnames[:-1])
+
+if __name__ == '__main__':
+    import tempfile
+    from conftest import *
+    with tempfile.TemporaryDirectory() as tmp:
+        test_SMOSL2(Path(tmp))

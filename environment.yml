@@ -3,22 +3,28 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - pandas
-  - numpy
+  - python==3.8
+  - pandas==1.5.3
+  - numpy<2
   - xarray
   - dask
   - netcdf4!=1.6.2
   - pyresample
+  - scipy
+  - pykdtree
   - pip
   - pip:
     - pygeobase
     - parse
     - pygeogrids>=0.4.0
     - pynetcf
-    - repurpose>=0.8
+    - repurpose>=0.12
     - trollsift
     - pytest-cov
     - pytest
     - matplotlib
     - zarr
     - tqdm
+    - chardet
+    - cf-xarray==0.8.4
+    - sphinx_rtd_theme

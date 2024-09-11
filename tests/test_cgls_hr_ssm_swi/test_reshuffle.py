@@ -29,7 +29,7 @@ def test_reshuffle_swi():
                   fname_templ="c_gls_SWI1km_{datetime}1200_CEURO_SCATSAR_V*.nc",
                   hours=(0,),
                   datetime_format = "%Y%m%d")
-        assert len(os.listdir(out_path)) == 2
+        assert len(os.listdir(out_path)) == 3
         ds = S1CglsTs(out_path, parameters='SWI_005')
         assert ds.grid.get_grid_points()[0].size == 4
         ts = ds.read(-0.95982, 44.9151)
@@ -50,7 +50,7 @@ def test_reshuffle_ssm():
                   fname_templ="c_gls_SSM1km_{datetime}_CEURO_S1CSAR_V*.nc",
                   hours=(0,),
                   datetime_format = "%Y%m%d%H%M")
-        assert len(os.listdir(out_path)) == 2
+        assert len(os.listdir(out_path)) == 3
         params = ['ssm']
         ds = S1CglsTs(out_path, parameters=params)
         assert ds.grid.get_grid_points()[0].size == 4

@@ -339,6 +339,7 @@ class ImageReaderBase(ReaderBase):
         target_grid=None,
         img2ts_kwargs=None,
         imgbaseconnection=False,
+        append=False,
         **reader_kwargs,
     ):
         """
@@ -368,7 +369,13 @@ class ImageReaderBase(ReaderBase):
         target_grid: Cellgrid, optional (default: None)
             To process a spatial subset pass a subgrid of the image grid
             here.
-        **img2ts_kwargs: additional keyword arguments to pass to Img2Ts
+        img2ts_kwargs: dict, optional (default: None)
+            additional keyword arguments to pass to Img2Ts
+        imgbaseconnection: bool, optional (default: False)
+            Apply wrapper to repeatedly try adding data in case a file is not
+            accessible.
+        append: bool, optional (default: False)
+            If a time series dataset already exists, append new data.
         **reader_kwargs: additional keyword arguments for GriddedNcOrthoMultiTs
 
         Returns
@@ -377,13 +384,16 @@ class ImageReaderBase(ReaderBase):
             Reader for the timeseries files or None if no reshuffling was
             performed
         """
+        if overwrite and append:
+            raise ValueError("You can not select both `overwrite` and `append` "
+                             "at the same time")
         outpath = Path(outpath)
         start, end = self._validate_start_end(start, end)
         if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
 
         # if overwrite=True, it was deleted now, otherwise append
-        if (not (outpath / "grid.nc").exists()) or (not overwrite):
+        if (not (outpath / "grid.nc").exists()) or append:
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
 

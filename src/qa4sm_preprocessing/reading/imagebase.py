@@ -381,7 +381,9 @@ class ImageReaderBase(ReaderBase):
         start, end = self._validate_start_end(start, end)
         if (outpath / "grid.nc").exists() and overwrite:
             shutil.rmtree(outpath)
-        if not (outpath / "grid.nc").exists():  # if overwrite=True, it was deleted now
+
+        # if overwrite=True, it was deleted now, otherwise append
+        if (not (outpath / "grid.nc").exists()) or (not overwrite):
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
 

@@ -2,16 +2,18 @@
 qa4sm-preprocessing
 ===================
 
-.. image:: https://github.com/awst-austria/qa4sm-preprocessing/workflows/Automated%20Tests/badge.svg?branch=master
+|ci| |cov| |pip| |doc|
+
+.. |ci| image:: https://github.com/awst-austria/qa4sm-preprocessing/actions/workflows/build.yml/badge.svg?branch=master
    :target: https://github.com/awst-austria/qa4sm-preprocessing/actions
 
-.. image:: https://coveralls.io/repos/awst-austria/qa4sm-preprocessing/badge.png?branch=master
+.. |cov| image:: https://coveralls.io/repos/awst-austria/qa4sm-preprocessing/badge.png?branch=master
   :target: https://coveralls.io/r/awst-austria/qa4sm-preprocessing?branch=master
 
-.. image:: https://badge.fury.io/py/qa4sm-preprocessing.svg
+.. |pip| image:: https://badge.fury.io/py/qa4sm-preprocessing.svg
     :target: https://badge.fury.io/py/qa4sm-preprocessing
 
-.. image:: https://readthedocs.org/projects/qa4sm-preprocessing/badge/?version=latest
+.. |doc| image:: https://readthedocs.org/projects/qa4sm-preprocessing/badge/?version=latest
    :target: http://qa4sm-preprocessing.readthedocs.org/
 
 The full documentation is available at https://qa4sm-preprocessing.readthedocs.io

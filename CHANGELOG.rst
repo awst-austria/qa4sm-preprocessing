@@ -6,8 +6,12 @@ Unreleased
 ==========
 -
 
+v0.3
+====
+* Smos package fixes `#29 <https://github.com/awst-austria/qa4sm-preprocessing/pull/29>`_ `#30 <https://github.com/awst-austria/qa4sm-preprocessing/pull/30>`_ `#31 <https://github.com/awst-austria/qa4sm-preprocessing/pull/31>`_
+
 v0.2
-======
+====
 - FRM4SM Release 2 version
 
 v0.1.4

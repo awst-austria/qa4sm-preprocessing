@@ -30,6 +30,7 @@ class SMOSL2Reader(L2Reader):
                 "Science_Flags",
                 "Confidence_Flags",
                 "Processing_Flags",
+                "Chi_2_P",
                 "Chi_2",
                 "RFI_Prob",
                 "N_RFI_X",

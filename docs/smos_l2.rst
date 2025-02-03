@@ -13,6 +13,13 @@ For the SBPCA data use the following FTP (requires access from ESA): ``dpgsrftps
 For L2 SM use the following FTP (requires an `account <https://earth.esa.int/eogateway/catalog/smos-science-products>`_):
 ``smos-diss.eo.esa.int``
 
+As of Feb. 2025, there were some issues downloading the files as the server did not allow recursive download via sftp. Instead, run the command
+
+.. code-block:: shell
+
+    lftp -c "set sftp:auto-confirm yes; open -u wpreimesberger sftp://dpgsrftpserver.smos.eo.esa.int; mirror --continue --parallel=5 -L /data/ftp/dpgsr_l2sm_IF/Out_Folder/LOC_DPGS_RC_L2SM ."
+
+
 Convert ZIP to netcdf
 ---------------------
 This is **only relevant for SBPCA data**.

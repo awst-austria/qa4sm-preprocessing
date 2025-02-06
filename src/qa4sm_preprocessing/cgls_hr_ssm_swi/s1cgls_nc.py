@@ -155,9 +155,7 @@ class S1Cgls1kmImage(ImageBase):
                     if self.fillval[parameter] is None:
                         self.fillval[parameter] = data.fill_value
 
-                    common_dtype = np.find_common_type(
-                        array_types=[data.dtype],
-                        scalar_types=[type(self.fillval[parameter])])
+                    common_dtype = np.promote_types((data.dtype), (type(self.fillval[parameter])))
                     self.fillval[parameter] = np.array([self.fillval[parameter]],
                                                        dtype=common_dtype)[0]
 

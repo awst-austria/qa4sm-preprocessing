@@ -3,12 +3,12 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - python==3.8
-  - pandas==1.5.3
-  - numpy<2
+  - python==3.12
+  - pandas
+  - numpy
   - xarray
   - dask
-  - netcdf4!=1.6.2
+  - netcdf4
   - pyresample
   - scipy
   - pykdtree
@@ -26,5 +26,5 @@ dependencies:
     - zarr
     - tqdm
     - chardet
-    - cf-xarray==0.8.4
+    - cf-xarray
     - sphinx_rtd_theme

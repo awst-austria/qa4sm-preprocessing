@@ -27,7 +27,7 @@ def make_test_timeseries(lats=[12, 34, 56], lons=[0.1, 2.3, 4.5]):
     ts1 = pd.Series(data, index=index, name="soil_moisture")
 
     # timeseries 2: hourly timestamps, but shorter period
-    index = pd.date_range("2020-06-01", "2020-08-01", freq="H")
+    index = pd.date_range("2020-06-01", "2020-08-01", freq="h")
     data = np.random.randn(len(index)) + 2
     ts2 = pd.Series(data, index=index, name="soil_moisture")
 
@@ -39,6 +39,7 @@ def make_test_timeseries(lats=[12, 34, 56], lons=[0.1, 2.3, 4.5]):
     data = np.random.randn(len(index)) - 2
     ts3 = pd.Series(data, index=index, name="soil_moisture")
 
+    ts3.index = ts3.index.astype('datetime64[ns]')
     timeseries = [ts1, ts2, ts3]
     metadata = {"soil_moisture": {"long_name": "soil moisture", "units": "m^3/m^3"}}
     return timeseries, lats, lons, metadata
@@ -203,7 +204,6 @@ def test_csv_pipeline_no_metadata(test_output_path):
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     for i in range(len(timeseries)):
-        print(i)
         ts = reader.read(i)["soil_moisture"]
         pd.testing.assert_series_equal(ts, timeseries[i], check_freq=False)
 

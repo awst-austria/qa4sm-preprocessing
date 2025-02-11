@@ -17,7 +17,7 @@ jobs:
   build:
     strategy:
       matrix:
-        python-version: ['3.11', '3.12']  # make sure that the qa4sm python version is included
+        python-version: ['3.12']  # make sure that the qa4sm python version is included
         os: ["ubuntu-latest"]
         ymlfile: ['environment.yml']
     name: Build py${{ matrix.python-version }} @ ${{ matrix.os }} 🐍

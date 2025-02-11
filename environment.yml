@@ -6,7 +6,7 @@ dependencies:
   - python
   - pandas
   - numpy
-  - xarray
+  - xarray>=2025.01.2
   - dask
   - netcdf4
   - pyresample

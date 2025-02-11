@@ -396,11 +396,10 @@ class ImageReaderBase(ReaderBase):
         if (not (outpath / "grid.nc").exists()) or append:
             outpath.mkdir(exist_ok=True, parents=True)
             testimg = self._testimg()
-
             if (
                 drop_crs
                 and "crs" in self.varnames
-                and testimg.crs.dtype.type is np.string_
+                and testimg.crs.dtype.type is np.bytes_
             ):
                 varnames = [v for v in self.varnames if v != "crs"]
             else:

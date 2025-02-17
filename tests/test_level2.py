@@ -49,7 +49,7 @@ def test_SMOSL2(test_output_path):
         assert str(t.astype("datetime64[D]")) == "2010-06-01"
 
     # test repurpose
-    reader.repurpose(outpath, overwrite=True, n_proc=1,)
+    reader.repurpose(outpath, overwrite=True, n_proc=4, img2ts_kwargs=dict(backend='multiprocessing'))
 
     grid = load_grid(str(outpath / 'grid.nc'))
     tsreader = GriddedNcIndexedRaggedTs(str(outpath), grid=grid)

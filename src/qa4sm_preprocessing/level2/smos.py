@@ -160,6 +160,8 @@ class SMOSL2Reader(L2Reader):
         }
 
     def repurpose(self, *args, **kwargs):
+        if not kwargs.get('img2ts_kwargs', None):
+            kwargs['img2ts_kwargs'] = dict(backend='multiprocessing')
         return super().repurpose(*args, **kwargs)
 
 

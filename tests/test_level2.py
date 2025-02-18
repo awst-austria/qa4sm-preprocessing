@@ -51,8 +51,7 @@ def test_SMOSL2(test_output_path):
         assert str(t.astype("datetime64[D]")) == "2010-06-01"
 
     # test repurpose
-    reader = reader.repurpose(outpath, overwrite=True, n_proc=4)
-
+    reader.repurpose(outpath, overwrite=True, n_proc=4)
     grid = load_grid(str(outpath / 'grid.nc'))
     tsreader = GriddedNcIndexedRaggedTs(str(outpath), grid=grid)
 

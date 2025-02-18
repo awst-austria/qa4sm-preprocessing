@@ -34,8 +34,6 @@ def test_SMOSL2(test_output_path):
         "acquisition_time",
     ]
 
-    print(reader)
-
     assert sorted(expected_varnames) == sorted(list(data.data_vars))
     for vn in expected_varnames:
         assert data[vn].dims == ("time", "loc")

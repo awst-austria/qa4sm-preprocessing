@@ -3,7 +3,6 @@ import xarray as xr
 from qa4sm_preprocessing.reading import StackImageReader
 from qa4sm_preprocessing.reading.transpose import write_transposed_dataset
 
-from pytest import test_data_path
 from tempfile import TemporaryDirectory
 from pathlib import Path
 

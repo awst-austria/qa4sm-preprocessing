@@ -12,6 +12,7 @@ from typing import Union, TypeVar
 import xarray as xr
 import shutil
 import zarr
+from numcodecs.blosc import Blosc
 
 from .utils import infer_chunksizes, nimages_for_memory
 
@@ -244,7 +245,7 @@ def _transpose(
         fill_value = testds[var].attrs.get("_FillValue", default_fill_value)
         tmp_stores[var] = zarr.create(
             new_dimsizes,
-            chunks=tmp_chunksizes,
+            chunks=tuple(tmp_chunksizes),
             store=tmp_fnames[var],
             overwrite=True,
             fill_value=fill_value,
@@ -278,7 +279,7 @@ def _transpose(
         if outfname.endswith(".zarr"):
             encoding[var] = {
                 "chunks": tuple(size for size in chunks.values()),
-                "compressor": zarr.Blosc(cname="zstd", clevel=complevel),
+                "compressor": Blosc(cname="zstd", clevel=complevel),
             }
         else:
             encoding[var] = {

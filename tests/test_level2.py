@@ -71,6 +71,67 @@ def test_SMOSL2(test_output_path):
 
 
 @pytest.mark.slow
+def test_SMOSL2_only_land(test_output_path):
+    """Test SMOSL2Reader with only_land=True parameter."""
+
+    outpath = test_output_path / "SMOS_L2_land_only_ts"
+
+    # Initialize reader with only_land=True
+    reader = SMOSL2Reader(test_data_path / "SMOS_L2", add_overpass_flag=True, only_land=True)
+
+    # Verify the correct grid file was loaded
+    assert reader.grid.n_gpi == 706114
+
+    # Test reader
+    data = reader.read_block()
+    expected_varnames = [
+        "Soil_Moisture",
+        "Soil_Moisture_DQX",
+        "Science_Flags",
+        "Confidence_Flags",
+        "Overpass",
+        "Processing_Flags",
+        "Chi_2",
+        "RFI_Prob",
+        "N_RFI_X",
+        "N_RFI_Y",
+        "M_AVA0",
+        "acquisition_time",
+    ]
+
+    assert sorted(expected_varnames) == sorted(list(data.data_vars))
+    for vn in expected_varnames:
+        assert data[vn].dims == ("time", "loc")
+        assert data[vn].shape[0] == 2
+
+    assert np.isfinite(data.Soil_Moisture).any()
+
+    # Test repurpose
+    reader.repurpose(outpath, overwrite=True, n_proc=4)
+
+    grid = load_grid(str(outpath / 'grid.nc'))
+    tsreader = GriddedNcIndexedRaggedTs(str(outpath), grid=grid)
+
+    idx = np.where(np.isfinite(data.Soil_Moisture))[1][0]
+    gpi = reader.grid.activegpis[idx]
+    assert gpi == 82846
+    ts = tsreader.read(gpi)
+
+    assert 'Overpass' in ts.columns
+    assert np.all(np.isin(np.unique(ts['Overpass'].values), [0, 1, 2]))
+
+    should = data.isel(loc=idx).to_dataframe()[['Soil_Moisture', 'acquisition_time']].dropna()
+
+    assert len(ts) == len(should)
+    assert ts.index[0] == pd.Timestamp("2010-06-01 08:18:20")
+    np.testing.assert_almost_equal(
+        ts.Soil_Moisture.values, should.Soil_Moisture.values
+    )
+    assert sorted(list(ts.columns)) == sorted(expected_varnames[:-1])
+
+
+
+@pytest.mark.slow
 def test_SMAPL2(test_output_path):
 
     outpath = test_output_path / "SMAP_L2_ts"

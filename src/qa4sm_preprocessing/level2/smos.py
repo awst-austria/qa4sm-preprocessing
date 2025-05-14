@@ -13,6 +13,7 @@ from qa4sm_preprocessing.level2.base import L2Reader, _repurpose_level2_parse_cl
 
 
 _smos_gridfile = Path(__file__).parent / "5deg_SMOSL2_grid.nc"
+_smos_only_land_gridfile = Path(__file__).parent / "5deg_SMOSL2_grid_land.nc"
 
 
 class SMOSL2Reader(L2Reader):
@@ -21,8 +22,10 @@ class SMOSL2Reader(L2Reader):
         directory: Union[Path, str],
         varnames: Union[List[str], str] = None,
         add_overpass_flag=False,
+        only_land=False,
     ):
         self.add_overpass_flag = add_overpass_flag
+        self.only_land = only_land
         if varnames is None:  # pragma: no branc
             varnames = [
                 "Soil_Moisture",
@@ -77,7 +80,10 @@ class SMOSL2Reader(L2Reader):
         return filenames[0]
 
     def _gridinfo(self):
-        grid = load_grid(_smos_gridfile)
+        if self.only_land:
+            grid = load_grid(_smos_only_land_gridfile)
+        else:
+            grid = load_grid(_smos_gridfile)
         return GridInfo.from_grid(grid, "unstructured")
 
     def _read_l2_file(
@@ -172,7 +178,7 @@ def _repurpose_smosl2_cli():
         "Process SMOS level 2 orbit files to timeseries."
     )
     logging.basicConfig(level=logging.INFO, filename=args.logfile)
-    reader = SMOSL2Reader(args.input_path, varnames=args.parameter)
+    reader = SMOSL2Reader(args.input_path, varnames=args.parameter, only_land=args.only_land)
     reader.repurpose(
         args.output_path,
         start=args.start,

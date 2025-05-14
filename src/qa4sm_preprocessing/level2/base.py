@@ -216,4 +216,9 @@ def _repurpose_level2_parse_cli_args(description):  # pragma: no cover
         nargs="+",
         help="Parameters to process.",
     )
+    parser.add_argument(
+        "--only_land",
+        action="store_true",
+        help="Process only land pixels.",
+    )
     return parser.parse_args()

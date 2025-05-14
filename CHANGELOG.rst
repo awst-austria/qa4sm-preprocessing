@@ -4,6 +4,9 @@ Changelog
 
 Unreleased
 ==========
+
+v0.5
+====
 - Add SMOS L2 land gridfile for land-only processing
 - Implement only-land reading option in SMOSL2Reader
 

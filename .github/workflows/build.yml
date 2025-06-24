@@ -37,7 +37,6 @@ jobs:
           channels: conda-forge,defaults
           activate-environment: qa4sm_preprocessing
           environment-file: ${{ matrix.ymlfile }}
-          auto-activate-base: false
       - name: Print environment infos
         shell: bash -l {0}
         run: |

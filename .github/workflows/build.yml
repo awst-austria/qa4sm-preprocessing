@@ -29,8 +29,12 @@ jobs:
           submodules: true
           fetch-depth: 0
 
-      - name: Clean conda config
-        run: rm -f ~/.condarc
+      - name: Clean all conda configs
+        run: |
+          rm -f ~/.condarc
+          rm -f /home/runner/.condarc
+          rm -f /home/runner/miniconda3/.condarc
+          rm -rf /home/runner/miniconda3/envs/*/
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -41,7 +45,6 @@ jobs:
           channels: conda-forge,defaults
           activate-environment: qa4sm_preprocessing
           environment-file: ${{ matrix.ymlfile }}
-          auto-activate-base: false
       - name: Print environment infos
         shell: bash -l {0}
         run: |

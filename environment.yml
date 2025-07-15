@@ -23,7 +23,7 @@ dependencies:
     - pytest-cov
     - pytest
     - matplotlib
-    - zarr
+    - zarr<=3.0.7
     - tqdm
     - chardet
     - cf-xarray

@@ -137,7 +137,7 @@ class StackImageReader(ImageReaderBase):
         if rename is not None:
             ds = ds.rename(rename)
 
-        super().__init__(
+        super(StackImageReader, self).__init__(
             ds,
             varnames,
             timename=timename,

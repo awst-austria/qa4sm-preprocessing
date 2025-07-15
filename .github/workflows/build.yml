@@ -13,11 +13,12 @@ on:
   schedule:
     - cron: '0 0 * * *' # daily
 
+
 jobs:
   build:
     strategy:
       matrix:
-        python-version: ['3.12']  # make sure that the qa4sm python version is included
+        python-version: ['3.12']
         os: ["ubuntu-latest"]
         ymlfile: ['environment.yml']
     name: Build py${{ matrix.python-version }} @ ${{ matrix.os }} 🐍
@@ -28,38 +29,42 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
-      - uses: conda-incubator/setup-miniconda@v3
+
+      # Replaced conda-incubator/setup-miniconda with mamba-org/setup-micromamba
+      - uses: mamba-org/setup-micromamba@v1
         with:
-          miniconda-version: "latest"
-          auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
-          mamba-version: "*"
-          channels: conda-forge,defaults
-          activate-environment: qa4sm_preprocessing
+          micromamba-version: 'latest' # Installs the latest version of micromamba
           environment-file: ${{ matrix.ymlfile }}
-          auto-activate-base: false
+          environment-name: qa4sm_preprocessing # Name of the environment to create/activate
+          init-shell: bash # Initialize for bash shells, so subsequent steps work
+          cache-environment: true # Enable caching of the environment for faster builds
+          post-cleanup: 'all' # Clean up micromamba installation files after the job
+
       - name: Print environment infos
-        shell: bash -l {0}
+        shell: bash -l {0} # The -l flag ensures the shell initialization from setup-micromamba is sourced
         run: |
-          conda info -a
-          conda list
+          micromamba info -a # Use micromamba command
+          micromamba list # Use micromamba command
           pip list
           which pip
           which python
+
       - name: Export Environment
         shell: bash -l {0}
         run: |
           mkdir -p artifacts
-          if [ ${{ matrix.ymlfile }} == "environment.yml" ]
+          if [ "${{ matrix.ymlfile }}" == "environment.yml" ] # Ensure correct string comparison
           then
               filename=env_py${{ matrix.python-version }}_${{ matrix.os }}.yml
-              conda env export --no-builds | grep -v "prefix" > artifacts/$filename
+              micromamba env export --name qa4sm_preprocessing --no-builds | grep -v "prefix" > artifacts/$filename # Use micromamba command and specify env name
           fi
+
       - name: Install package and test
         shell: bash -l {0}
         run: |
-          pip install .
+          pip install . # This should use the pip from the activated 'qa4sm_preprocessing' environment
           pytest
+
       - name: Upload Coverage
         shell: bash -l {0}
         run: |

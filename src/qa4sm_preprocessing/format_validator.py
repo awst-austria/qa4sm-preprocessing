@@ -401,7 +401,7 @@ class NetCDFValidator:
         return vars
 
 
-def run_upload_format_check(request, file, filename):
+def run_upload_format_check(file, filename):
     """Main function using the NetCDFValidator class"""
     try:
         file.seek(0)

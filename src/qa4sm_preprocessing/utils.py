@@ -252,7 +252,7 @@ def verify_file_extension(filename):
     return filename.lower().endswith(valid_extensions)
 
 
-def validate_file_upload(request, file, expected_filename):
+def validate_file_upload(file, expected_filename):
     """
     Validate file upload with comprehensive checks.
 
@@ -266,11 +266,6 @@ def validate_file_upload(request, file, expected_filename):
     # Check file extension
     if not verify_file_extension(file.name):
         return False, "File must be .nc4, .nc, or .zip format", 400
-
-    # Check file size against user's available space
-    if hasattr(request.user, 'space_left') and request.user.space_left:
-        if file.size > request.user.space_left:
-            return False, f"File size ({file.size} bytes) exceeds available space ({request.user.space_left} bytes)", 413
 
     # NETCDF Case
     if file.name.endswith(".nc") or file.name.endswith(".nc4"):

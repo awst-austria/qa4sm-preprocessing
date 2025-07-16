@@ -5,6 +5,10 @@ Changelog
 Unreleased
 ==========
 
+v0.6
+====
+- Add format validation for files uploaded to qa4sm (ZIP, netCDF)
+
 v0.5
 ====
 - Add SMOS L2 land gridfile for land-only processing

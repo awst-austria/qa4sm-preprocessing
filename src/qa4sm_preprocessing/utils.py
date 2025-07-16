@@ -5,6 +5,8 @@ import shutil
 from typing import Tuple, Union, Sequence, Mapping
 import yaml
 from zipfile import ZipFile
+import netCDF4
+import io
 
 from pygeogrids.grids import BasicGrid
 from pygeogrids.netcdf import load_grid
@@ -15,6 +17,7 @@ from qa4sm_preprocessing.reading.timeseries import (
     TimeseriesListTs,
     GriddedNcContiguousRaggedTs,
 )
+from qa4sm_preprocessing.format_validator import NetCDFValidator, ZipValidator
 
 
 def make_csv_dataset(
@@ -55,17 +58,15 @@ def make_csv_dataset(
         Search radius in km for the options `only_ismn` or `only`
     """
     nloc = len(timeseries)
-    assert (
-        nloc == len(lons) == len(lats)
-    ), "'timeseries', 'lons', and 'lats' must all have the same length!"
+    assert (nloc == len(lons) == len(lats)
+           ), "'timeseries', 'lons', and 'lats' must all have the same length!"
 
     grid = _get_grid(only_ismn, only, radius)
 
     for gpi, (ts, lat, lon) in enumerate(zip(timeseries, lats, lons)):
         if grid is not None:
             nearest_gpi, dist = grid.find_k_nearest_gpi(
-                lon, lat, k=1, max_dist=radius * 1000
-            )
+                lon, lat, k=1, max_dist=radius * 1000)
             if dist == np.inf:
                 continue
         write_timeseries(ts, gpi, lat, lon, name, outpath)
@@ -110,9 +111,8 @@ def make_gridded_contiguous_ragged_dataset(
     """
 
     nloc = len(timeseries)
-    assert (
-        nloc == len(lons) == len(lats)
-    ), "'timeseries', 'lons', and 'lats' must all have the same length!"
+    assert (nloc == len(lons) == len(lats)
+           ), "'timeseries', 'lons', and 'lats' must all have the same length!"
 
     grid = _get_grid(only_ismn, only, radius)
     if grid is not None:
@@ -122,18 +122,17 @@ def make_gridded_contiguous_ragged_dataset(
         newts = []
         for gpi, (ts, lat, lon) in enumerate(zip(timeseries, lats, lons)):
             nearest_gpi, dist = grid.find_k_nearest_gpi(
-                lon, lat, k=1, max_dist=radius * 1000
-            )
+                lon, lat, k=1, max_dist=radius * 1000)
             if dist == np.inf:
                 continue
             newlats.append(lat)
             newlons.append(lon)
             newgpis.append(gpi)
             newts.append(ts)
-        assert len(newts) > 0, "No timeseries close to selected coordinates found!"
+        assert len(
+            newts) > 0, "No timeseries close to selected coordinates found!"
         reader = TimeseriesListTs(
-            newts, newlats, newlons, metadata=metadata, gpi=newgpis
-        )
+            newts, newlats, newlons, metadata=metadata, gpi=newgpis)
     else:
         reader = TimeseriesListTs(timeseries, lats, lons, metadata=metadata)
     reader.repurpose(outpath, overwrite=True)
@@ -214,40 +213,152 @@ def preprocess_user_data(uploaded, outpath, max_filesize=30):
         if filesize > max_filesize:
             raise ValueError(
                 f"Unpacked file size is too large: {filesize}GB."
-                " Maximum allowed unpacked file size is {max_filesize} GB"
-            )
+                " Maximum allowed unpacked file size is {max_filesize} GB")
 
         filelist = zfile.namelist()
 
         nc_files_present = any(
-            map(lambda s: s.endswith(".nc") or s.endswith(".nc4"), filelist)
-        )
+            map(lambda s: s.endswith(".nc") or s.endswith(".nc4"), filelist))
         csv_files_present = any(map(lambda s: s.endswith(".csv"), filelist))
 
         if not nc_files_present and not csv_files_present:  # pragma: no cover
-            raise ValueError(f"{str(uploaded)} does not contain CSV or netCDF files!")
+            raise ValueError(
+                f"{str(uploaded)} does not contain CSV or netCDF files!")
         elif nc_files_present and csv_files_present:  # pragma: no cover
             raise ValueError(
                 f"{str(uploaded)} contains CSV and netCDF, only one datatype"
-                " is allowed."
-            )
+                " is allowed.")
         elif nc_files_present:
             outpath.mkdir(exist_ok=True, parents=True)
             for f in filelist:
                 # extracting is a bit complicated with zipfile, in order to
                 # not recreate the whole directory structure we have to do
                 # manual copying
-                with zfile.open(f) as zf, open(outpath / Path(f).name, "wb") as tf:
+                with zfile.open(f) as zf, open(outpath / Path(f).name,
+                                               "wb") as tf:
                     shutil.copyfileobj(zf, tf)
             return GriddedNcContiguousRaggedTs(outpath)
         else:  # only csv files present
             reader = ZippedCsvTs(uploaded)
             return reader.repurpose(outpath)
     else:  # pragma: no cover
-        raise ValueError(
-            f"Unknown uploaded data format: {str(uploaded)},"
-            " only *.nc and *.zip are supported."
-        )
+        raise ValueError(f"Unknown uploaded data format: {str(uploaded)},"
+                         " only *.nc and *.zip are supported.")
+
+
+def verify_file_extension(filename):
+    """Check if file has a valid extension."""
+    valid_extensions = ('.nc4', '.nc', '.zip')
+    return filename.lower().endswith(valid_extensions)
+
+
+def validate_file_upload(request, file, expected_filename):
+    """
+    Validate file upload with comprehensive checks.
+
+    Returns:
+        tuple: (is_valid, error_message, status_code)
+    """
+    # Check filename matches expectation
+    if file.name != expected_filename:
+        return False, f"Expected '{expected_filename}', got '{file.name}'", 400
+
+    # Check file extension
+    if not verify_file_extension(file.name):
+        return False, "File must be .nc4, .nc, or .zip format", 400
+
+    # Check file size against user's available space
+    if hasattr(request.user, 'space_left') and request.user.space_left:
+        if file.size > request.user.space_left:
+            return False, f"File size ({file.size} bytes) exceeds available space ({request.user.space_left} bytes)", 413
+
+    # NETCDF Case
+    if file.name.endswith(".nc") or file.name.endswith(".nc4"):
+        try:
+            # Reset file pointer to beginning
+            file.seek(0)
+
+            # Read file content into memory
+            file_content = file.read()
+            file.seek(0)  # Reset for potential later use
+
+            # Create in-memory dataset
+            memory_file = io.BytesIO(file_content)
+
+            # Open NetCDF dataset from memory
+            with netCDF4.Dataset(
+                    'dummy', mode='r', memory=memory_file.read()) as nc:
+                validator = NetCDFValidator(nc)
+                is_valid, results, status = validator.validate()
+
+                if is_valid:
+                    # Success case - extract relevant info for success message
+                    vars = len(validator.get_variables())
+                    message = f"NetCDF file validation successful. Found {vars} variables."
+
+                    return True, message, 200
+                else:
+                    # Validation failed - compile error messages
+                    error_messages = results.get('errors',
+                                                 ['Unknown validation error'])
+                    error_summary = "; ".join(
+                        error_messages[:3])  # Limit to first 3 errors
+
+                    if len(error_messages) > 3:
+                        error_summary += f" (and {len(error_messages) - 3} more errors)"
+
+                    return False, f"NetCDF validation failed: {error_summary}", status
+
+        except Exception as e:
+            return False, f"Error reading NetCDF file: {str(e)}", 500
+
+    # ZIP Case
+    elif file.name.endswith(".zip"):
+        try:
+            # Reset file pointer to beginning
+            file.seek(0)
+
+            # Read file content into memory
+            file_content = file.read()
+            file.seek(0)  # Reset for potential later use
+
+            # Create in-memory zip file
+            memory_file = io.BytesIO(file_content)
+
+            validator = ZipValidator(memory_file)
+            is_valid, results, status = validator.validate()
+
+            if is_valid:
+                # Success case - extract relevant info for success message
+                message = "ZIP file validation successful."
+
+                # Add specific details if available in results
+                if results.get('file_count'):
+                    message += f" Found {results['file_count']} files."
+
+                # Include warnings if any
+                if results.get('warnings'):
+                    warning_count = len(results['warnings'])
+                    message += f" ({warning_count} warning(s) found)"
+
+                return True, message, status
+            else:
+                # Validation failed - compile error messages
+                error_messages = results.get('errors',
+                                             ['Unknown validation error'])
+                error_summary = "; ".join(
+                    error_messages[:3])  # Limit to first 3 errors
+
+                if len(error_messages) > 3:
+                    error_summary += f" (and {len(error_messages) - 3} more errors)"
+
+                return False, f"ZIP validation failed: {error_summary}", status
+
+        except Exception as e:
+            return False, f"Error reading ZIP file: {str(e)}", 500
+
+    # This should not be reached due to file extension check above
+    return False, "Unsupported file format", 400
 
 
 def ismn_grid():
@@ -273,5 +384,4 @@ def ismn_grid():
 
 
 if __name__ == '__main__':
-    preprocess_user_data("/tmp/test/ascat.zip",
-                         "/tmp")
+    preprocess_user_data("/tmp/test/ascat.zip", "/tmp")

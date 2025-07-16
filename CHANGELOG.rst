@@ -5,6 +5,11 @@ Changelog
 Unreleased
 ==========
 
+v0.6.1
+======
+- Remove request parameter from validate_file_upload call
+- Skip user space validation as it's handled in UI layer
+
 v0.6
 ====
 - Add format validation for files uploaded to qa4sm (ZIP, netCDF)

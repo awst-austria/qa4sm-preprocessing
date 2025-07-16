@@ -1,9 +1,13 @@
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import os
+import pandas as pd
+import numpy as np
+import zipfile
 
 from qa4sm_preprocessing.utils import validate_file_upload
-from qa4sm_preprocessing.format_validator import NetCDFValidator
+from qa4sm_preprocessing.format_validator import NetCDFValidator, ZipValidator, run_upload_format_check
+
 
 
 class TestNetCDFValidation:
@@ -268,3 +272,336 @@ class TestZipValidation:
         assert not is_valid
         assert "ZIP validation failed" in message
         assert status == 400
+
+class TestNetCDFValidatorAdditional:
+    """Additional tests for NetCDFValidator functions"""
+
+    def test_detect_netcdf4_format_with_groups(self):
+        """Test NetCDF4 format detection with groups"""
+        mock_nc = Mock()
+        mock_nc.groups = {'group1': Mock()}
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+        mock_nc.variables = {'var1': Mock()}
+
+        validator = NetCDFValidator(mock_nc)
+        assert validator._detect_netcdf4_format() == True
+
+    def test_detect_netcdf4_format_classic(self):
+        """Test NetCDF classic format detection"""
+        mock_nc = Mock()
+        mock_nc.groups = {}
+        mock_nc.file_format = 'NETCDF3_CLASSIC'
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock()}
+        mock_nc.variables = {'var1': Mock()}
+
+        validator = NetCDFValidator(mock_nc)
+        assert validator._detect_netcdf4_format() == False
+
+    def test_get_file_format_info_netcdf4(self):
+        """Test file format info for NetCDF4"""
+        mock_nc = Mock()
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {'group1': Mock()}
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+        mock_nc.variables = {'var1': Mock(), 'var2': Mock()}
+
+        validator = NetCDFValidator(mock_nc)
+        info = validator._get_file_format_info()
+
+        assert info['format'] == 'NETCDF4'
+        assert 'NetCDF4/HDF5' in info['features']
+        assert 'Groups' in info['features']
+        assert info['dimensions'] == 3
+        assert info['variables'] == 2
+
+    def test_get_file_format_info_classic(self):
+        """Test file format info for NetCDF classic"""
+        mock_nc = Mock()
+        mock_nc.file_format = 'NETCDF3_CLASSIC'
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock()}
+        mock_nc.variables = {'var1': Mock()}
+
+        validator = NetCDFValidator(mock_nc)
+        info = validator._get_file_format_info()
+
+        assert info['format'] == 'NETCDF3_CLASSIC'
+        assert 'NetCDF Classic' in info['features']
+
+    def test_validate_naming_conventions_invalid_names(self):
+        """Test naming convention validation with invalid names"""
+        mock_nc = Mock()
+        mock_nc.dimensions = {'lat-invalid': Mock(), 'lon': Mock(), 'time': Mock()}
+
+        var1 = Mock()
+        var1.dimensions = ('time', 'lat', 'lon')
+        var1.ncattrs.return_value = ['valid_attr', 'invalid-attr']
+
+        mock_nc.variables = {'invalid-var': var1}
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {}
+
+        validator = NetCDFValidator(mock_nc)
+        validator._validate_naming_conventions()
+
+        assert any("Invalid dimension name" in error for error in validator.errors)
+        assert any("Invalid variable name" in error for error in validator.errors)
+        assert any("Invalid attribute name" in error for error in validator.errors)
+
+    def test_validate_naming_conventions_long_variable_name(self):
+        """Test naming convention validation with long variable names"""
+        mock_nc = Mock()
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+
+        var1 = Mock()
+        var1.dimensions = ('time', 'lat', 'lon')
+        var1.ncattrs.return_value = []
+
+        long_name = 'a' * 35  # 35 characters, over 30 limit
+        mock_nc.variables = {long_name: var1}
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {}
+
+        validator = NetCDFValidator(mock_nc)
+        validator._validate_naming_conventions()
+
+        assert any("cannot be longer than 30 characters" in error for error in validator.errors)
+
+    def test_validate_variables_no_valid_vars(self):
+        """Test variable validation when no valid variables exist"""
+        mock_nc = Mock()
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+
+        var1 = Mock()
+        var1.dimensions = ('lat', 'lon')  # Only 2 dimensions
+
+        mock_nc.variables = {'lat': Mock(), 'lon': Mock(), 'time': Mock(), 'var1': var1}
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {}
+
+        validator = NetCDFValidator(mock_nc)
+        validator._validate_variables()
+
+        assert any("Variables need 3 dimensions" in error for error in validator.errors)
+
+    def test_validate_coordinate_ranges_invalid_ranges(self):
+        """Test coordinate range validation with invalid ranges"""
+        mock_nc = Mock()
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+
+        lat_var = Mock()
+        lat_var.dimensions = ('lat',)
+        lat_var.units = 'degrees_north'
+        lat_var.__getitem__ = Mock(return_value=np.array([95.0]))  # Invalid lat
+
+        lon_var = Mock()
+        lon_var.dimensions = ('lon',)
+        lon_var.units = 'degrees_east'
+        lon_var.__getitem__ = Mock(return_value=np.array([185.0]))  # Invalid lon
+
+        time_var = Mock()
+        time_var.dimensions = ('time',)
+        time_var.units = 'days since 1900-01-01'
+        time_var.__getitem__ = Mock(return_value=np.array([1, 1, 2]))  # Duplicates
+
+        mock_nc.variables = {'lat': lat_var, 'lon': lon_var, 'time': time_var}
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {}
+
+        validator = NetCDFValidator(mock_nc)
+        validator._validate_coordinate_ranges()
+
+        assert any("outside valid range" in error for error in validator.errors)
+        assert any("Duplicate timestamps" in error for error in validator.errors)
+
+    def test_validate_netcdf4_specific_with_groups(self):
+        """Test NetCDF4 specific validation with groups"""
+        mock_nc = Mock()
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+        mock_nc.variables = {}
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {'group1': Mock()}
+        mock_nc.cmptypes = []  # Empty list for cmptypes
+
+        validator = NetCDFValidator(mock_nc)
+        validator._validate_netcdf4_specific()
+
+        assert any("groups found" in error for error in validator.errors)
+
+    def test_get_variables_basic(self):
+        """Test get_variables method"""
+        mock_nc = Mock()
+        mock_nc.dimensions = {'lat': Mock(), 'lon': Mock(), 'time': Mock()}
+
+        var1 = Mock()
+        var1.dimensions = ('time', 'lat', 'lon')
+        var2 = Mock()
+        var2.dimensions = ('time', 'lat', 'lon')
+        coord_var = Mock()
+        coord_var.dimensions = ('lat',)
+
+        mock_nc.variables = {
+            'lat': coord_var,
+            'lon': coord_var,
+            'time': coord_var,
+            'var1': var1,
+            'var2': var2
+        }
+        mock_nc.file_format = 'NETCDF4'
+        mock_nc.groups = {}
+
+        validator = NetCDFValidator(mock_nc)
+        vars_list = validator.get_variables()
+
+        assert 'var1' in vars_list
+        assert 'var2' in vars_list
+        assert 'lat' not in vars_list
+        assert 'lon' not in vars_list
+        assert 'time' not in vars_list
+
+    def test_run_upload_format_check_txt_file(self):
+        """Test run_upload_format_check with txt file"""
+        mock_request = Mock()
+        mock_file = Mock()
+
+        result = run_upload_format_check(mock_request, mock_file, 'test.txt')
+
+        assert result[0] == True
+        assert result[2] == 200
+
+    def test_run_upload_format_check_exception(self):
+        """Test run_upload_format_check with exception"""
+        mock_request = Mock()
+        mock_file = Mock()
+        mock_file.seek.side_effect = Exception("File error")
+
+        result = run_upload_format_check(mock_request, mock_file, 'test.nc')
+
+        assert result[0] == False
+        assert result[2] == 500
+
+
+class TestZipValidatorAdditional:
+    """Additional tests for ZipValidator functions"""
+
+    def test_is_netcdf_only_true(self):
+        """Test _is_netcdf_only returns True for NetCDF-only ZIP"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.nc_files = ['file1.nc', 'file2.nc']
+        validator.file_info = {'total_files': 2}
+
+        assert validator._is_netcdf_only() == True
+
+    def test_is_netcdf_only_false(self):
+        """Test _is_netcdf_only returns False for mixed files"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.nc_files = ['file1.nc']
+        validator.csv_files = ['file1.csv']
+        validator.file_info = {'total_files': 2}
+
+        assert validator._is_netcdf_only() == False
+
+    def test_validate_file_types_no_csv(self):
+        """Test file type validation with no CSV files"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.csv_files = []
+        validator.yml_files = []
+        validator.file_info = {'total_files': 0}
+
+        validator._validate_file_types()
+
+        assert any("must contain at least one CSV file" in error for error in validator.errors)
+
+    def test_validate_file_types_multiple_yml(self):
+        """Test file type validation with multiple YML files"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.csv_files = ['file1.csv']
+        validator.yml_files = ['meta1.yml', 'meta2.yml']
+        validator.file_info = {'total_files': 3}
+
+        validator._validate_file_types()
+
+        assert any("at most one YML" in error for error in validator.errors)
+
+    def test_validate_naming_conventions_invalid_format(self):
+        """Test naming convention validation with invalid format"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.csv_files = ['invalid_name.csv', 'also_invalid.csv']
+
+        validator._validate_naming_conventions()
+
+        assert any("Invalid filename format" in error for error in validator.errors)
+
+    def test_validate_naming_conventions_duplicate_gpi(self):
+        """Test naming convention validation with duplicate GPI"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.csv_files = [
+            'dataset_gpi=123_lat=45.0_lon=90.0.csv',
+            'dataset_gpi=123_lat=46.0_lon=91.0.csv'
+        ]
+
+        validator._validate_naming_conventions()
+
+        assert any("Duplicate GPI value" in error for error in validator.errors)
+
+    def test_validate_naming_conventions_invalid_coordinates(self):
+        """Test naming convention validation with invalid coordinates"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.csv_files = [
+            'dataset_gpi=123_lat=95.0_lon=185.0.csv'  # Invalid lat/lon
+        ]
+
+        validator._validate_naming_conventions()
+
+        assert any("Invalid latitude" in error for error in validator.errors)
+        assert any("Invalid longitude" in error for error in validator.errors)
+
+    def test_validate_naming_conventions_different_datasets(self):
+        """Test naming convention validation with different dataset names"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+        validator.csv_files = [
+            'dataset1_gpi=123_lat=45.0_lon=90.0.csv',
+            'dataset2_gpi=124_lat=46.0_lon=91.0.csv'
+        ]
+
+        validator._validate_naming_conventions()
+
+        assert any("same dataset name" in error for error in validator.errors)
+
+    def test_validate_zip_structure_bad_zip(self):
+        """Test validation with bad ZIP file"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+
+        # Create a mock that raises BadZipFile when used as context manager
+        def mock_zipfile_constructor(*args, **kwargs):
+            raise zipfile.BadZipFile("Bad ZIP")
+
+        with patch('qa4sm_preprocessing.format_validator.zipfile.ZipFile', side_effect=mock_zipfile_constructor):
+            validator._validate_zip_structure()
+
+        assert any("not a valid ZIP archive" in error for error in validator.errors)
+
+    def test_validate_zip_structure_empty_zip(self):
+        """Test validation with empty ZIP file"""
+        mock_zip = Mock()
+        validator = ZipValidator(mock_zip)
+
+        # Create a mock zipfile that returns empty namelist
+        mock_zip_ref = Mock()
+        mock_zip_ref.testzip.return_value = None
+        mock_zip_ref.namelist.return_value = []
+
+        with patch('qa4sm_preprocessing.format_validator.zipfile.ZipFile') as mock_zipfile:
+            mock_zipfile.return_value.__enter__.return_value = mock_zip_ref
+            validator._validate_zip_structure()
+
+        assert any("ZIP file is empty" in error for error in validator.errors)

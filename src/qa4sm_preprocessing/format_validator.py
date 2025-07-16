@@ -7,7 +7,6 @@ import zipfile
 import io
 import re
 import pandas as pd
-import yaml
 
 
 class NetCDFValidator:

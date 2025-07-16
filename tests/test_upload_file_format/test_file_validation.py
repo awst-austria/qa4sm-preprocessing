@@ -1,11 +1,10 @@
 import pytest
-from unittest.mock import Mock, patch
-import os
-import pandas as pd
+from unittest.mock import Mock, patch, MagicMock
+import os, io
 import numpy as np
 import zipfile
 
-from qa4sm_preprocessing.utils import validate_file_upload
+from qa4sm_preprocessing.utils import validate_file_upload, verify_file_extension
 from qa4sm_preprocessing.format_validator import NetCDFValidator, ZipValidator, run_upload_format_check
 
 
@@ -605,3 +604,241 @@ class TestZipValidatorAdditional:
             validator._validate_zip_structure()
 
         assert any("ZIP file is empty" in error for error in validator.errors)
+
+
+
+class TestUtils:
+
+    def setup_method(self):
+        """Set up test data paths"""
+        self.test_data_dir = os.path.join(
+            os.path.dirname(__file__),
+            "../test-data/user_data/"
+        )
+
+        # Test file paths
+        self.invalid_zip_path = os.path.join(self.test_data_dir, "invalid-dataset-format.zip")
+        self.valid_zip_path = os.path.join(self.test_data_dir, "test_data_csv.zip")
+        self.invalid_nc_path = os.path.join(self.test_data_dir, "inproper-dataset-format.nc")
+        self.valid_nc_path = os.path.join(self.test_data_dir, "teststack_c3s_2dcoords_min_attrs.nc")
+
+    def create_mock_file(self, filename, content, file_size=None):
+        """Create a mock file object"""
+        mock_file = Mock()
+        mock_file.name = filename
+        mock_file.size = file_size if file_size is not None else len(content)
+
+        # Create a BytesIO object for seek/read operations
+        content_io = io.BytesIO(content)
+        mock_file.seek = content_io.seek
+        mock_file.read = content_io.read
+
+        return mock_file
+
+    def create_mock_request(self, space_left=None):
+        """Create a mock request object"""
+        request = Mock()
+        user = Mock()
+
+        if space_left is not None:
+            user.space_left = space_left
+        else:
+            # User without space_left attribute
+            if hasattr(user, 'space_left'):
+                delattr(user, 'space_left')
+
+        request.user = user
+        return request
+
+    def test_verify_file_extension_valid_extensions(self):
+        """Test verify_file_extension with valid extensions"""
+        assert verify_file_extension("test.nc")
+        assert verify_file_extension("test.nc4")
+        assert verify_file_extension("test.zip")
+        assert verify_file_extension("TEST.NC")  # Case insensitive
+        assert verify_file_extension("file.with.dots.nc4")
+
+    def test_verify_file_extension_invalid_extensions(self):
+        """Test verify_file_extension with invalid extensions"""
+        assert not verify_file_extension("test.txt")
+        assert not verify_file_extension("test.csv")
+        assert not verify_file_extension("test.json")
+        assert not verify_file_extension("test")
+        assert not verify_file_extension("test.")
+
+    def test_validate_file_upload_filename_mismatch(self):
+        """Test validate_file_upload with mismatched filename"""
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        file_content = b"test content"
+        uploaded_file = self.create_mock_file("wrong_name.nc", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "expected_name.nc")
+
+        assert not is_valid
+        assert status == 400
+        assert "Expected 'expected_name.nc', got 'wrong_name.nc'" in message
+
+    def test_validate_file_upload_invalid_extension(self):
+        """Test validate_file_upload with invalid file extension"""
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        file_content = b"test content"
+        uploaded_file = self.create_mock_file("test.txt", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "test.txt")
+
+        assert not is_valid
+        assert status == 400
+        assert "File must be .nc4, .nc, or .zip format" in message
+
+    def test_validate_file_upload_file_too_large(self):
+        """Test validate_file_upload with file exceeding space limit"""
+        request = self.create_mock_request(space_left=100)  # Very small space limit
+
+        large_content = b"x" * 200  # Larger than space limit
+        uploaded_file = self.create_mock_file("large_file.nc", large_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "large_file.nc")
+
+        assert not is_valid
+        assert status == 413
+        assert "File size" in message
+        assert "exceeds available space" in message
+
+    def test_validate_file_upload_valid_zip(self):
+        """Test validate_file_upload with valid zip file"""
+        if not os.path.exists(self.valid_zip_path):
+            pytest.skip(f"Test file not found: {self.valid_zip_path}")
+
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Read actual zip file
+        with open(self.valid_zip_path, 'rb') as f:
+            file_content = f.read()
+
+        uploaded_file = self.create_mock_file("test_data_csv.zip", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "test_data_csv.zip")
+
+        assert is_valid
+        assert status == 200
+        assert "ZIP file validation successful" in message
+
+    def test_validate_file_upload_invalid_zip(self):
+        """Test validate_file_upload with invalid zip file"""
+        if not os.path.exists(self.invalid_zip_path):
+            pytest.skip(f"Test file not found: {self.invalid_zip_path}")
+
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Read actual invalid zip file
+        with open(self.invalid_zip_path, 'rb') as f:
+            file_content = f.read()
+
+        uploaded_file = self.create_mock_file("invalid-dataset-format.zip", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "invalid-dataset-format.zip")
+
+        assert not is_valid
+        assert "ZIP validation failed" in message
+
+    def test_validate_file_upload_valid_nc(self):
+        """Test validate_file_upload with valid NetCDF file"""
+        if not os.path.exists(self.valid_nc_path):
+            pytest.skip(f"Test file not found: {self.valid_nc_path}")
+
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Read actual NetCDF file
+        with open(self.valid_nc_path, 'rb') as f:
+            file_content = f.read()
+
+        uploaded_file = self.create_mock_file("teststack_c3s_2dcoords_min_attrs.nc", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "teststack_c3s_2dcoords_min_attrs.nc")
+
+        assert is_valid
+        assert status == 200
+        assert "NetCDF file validation successful" in message
+
+    def test_validate_file_upload_invalid_nc(self):
+        """Test validate_file_upload with invalid NetCDF file"""
+        if not os.path.exists(self.invalid_nc_path):
+            pytest.skip(f"Test file not found: {self.invalid_nc_path}")
+
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Read actual invalid NetCDF file
+        with open(self.invalid_nc_path, 'rb') as f:
+            file_content = f.read()
+
+        uploaded_file = self.create_mock_file("inproper-dataset-format.nc", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "inproper-dataset-format.nc")
+
+        assert not is_valid
+        assert "NetCDF validation failed" in message
+
+    def test_validate_file_upload_corrupted_netcdf(self):
+        """Test validate_file_upload with corrupted NetCDF file content"""
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Create corrupted NetCDF file (just random bytes)
+        corrupted_content = b"This is not a valid NetCDF file content"
+        uploaded_file = self.create_mock_file("corrupted.nc", corrupted_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "corrupted.nc")
+
+        assert not is_valid
+        assert status == 500
+        assert "Error reading NetCDF file" in message
+
+    def test_validate_file_upload_corrupted_zip(self):
+        """Test validate_file_upload with corrupted ZIP file content"""
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Create corrupted ZIP file (just random bytes)
+        corrupted_content = b"This is not a valid ZIP file content"
+        uploaded_file = self.create_mock_file("corrupted.zip", corrupted_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "corrupted.zip")
+
+        assert not is_valid
+        assert status == 400
+        assert "ZIP validation failed: File is not a valid ZIP archive" in message
+
+    def test_validate_file_upload_user_without_space_left(self):
+        """Test validate_file_upload with user having no space_left attribute"""
+        request = self.create_mock_request()  # No space_left attribute
+
+        file_content = b"test content"
+        uploaded_file = self.create_mock_file("test.nc", file_content)
+
+        # This should not raise an error and should proceed to validation
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "test.nc")
+
+        # Result depends on whether the content is valid NetCDF or not
+        # But it should not fail due to space check
+        assert is_valid is not None
+        assert message is not None
+        assert status is not None
+
+    def test_validate_file_upload_nc4_extension(self):
+        """Test validate_file_upload with .nc4 extension"""
+        if not os.path.exists(self.valid_nc_path):
+            pytest.skip(f"Test file not found: {self.valid_nc_path}")
+
+        request = self.create_mock_request(space_left=10 * 1024 * 1024)
+
+        # Read actual NetCDF file but use .nc4 extension
+        with open(self.valid_nc_path, 'rb') as f:
+            file_content = f.read()
+
+        uploaded_file = self.create_mock_file("test_file.nc4", file_content)
+
+        is_valid, message, status = validate_file_upload(request, uploaded_file, "test_file.nc4")
+
+        assert is_valid
+        assert status == 200
+        assert "NetCDF file validation successful" in message

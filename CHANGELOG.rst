@@ -5,6 +5,10 @@ Changelog
 Unreleased
 ==========
 
+v0.6.2
+======
+- Remove original user upload file
+
 v0.6.1
 ======
 - Remove request parameter from validate_file_upload call

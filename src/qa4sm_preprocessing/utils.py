@@ -214,6 +214,7 @@ def preprocess_user_data(uploaded, outpath, max_filesize=30, empty_file_ok: Opti
             netcdf_file = netCDF4.Dataset(
                 os.path.join(netcdf_parent_dir, netcdf_file_name), 'w')
             netcdf_file.close()
+            return reader.repurpose(outpath)
         else:
             return reader.repurpose(outpath)
     elif uploaded.name.endswith(".zip"):
@@ -255,6 +256,7 @@ def preprocess_user_data(uploaded, outpath, max_filesize=30, empty_file_ok: Opti
                 with ZipFile(os.path.join(zip_parent_dir, zip_file_name),
                              'w') as zf:
                     pass
+                return GriddedNcContiguousRaggedTs(outpath)
             else:
                 return GriddedNcContiguousRaggedTs(outpath)
         else:  # only csv files present
@@ -265,6 +267,7 @@ def preprocess_user_data(uploaded, outpath, max_filesize=30, empty_file_ok: Opti
                 os.remove(uploaded)
                 with ZipFile(os.path.join(zip_parent_dir, zip_file_name), 'w') as zf:
                     pass
+                return reader.repurpose(outpath)
             else:
                 return reader.repurpose(outpath)
     else:  # pragma: no cover

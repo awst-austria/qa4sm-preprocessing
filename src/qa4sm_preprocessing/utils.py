@@ -9,6 +9,7 @@ import yaml
 from zipfile import ZipFile
 import netCDF4
 import io
+from typing import Optional
 
 from pygeogrids.grids import BasicGrid
 from pygeogrids.netcdf import load_grid
@@ -183,7 +184,7 @@ def write_timeseries(
     ts.to_csv(path)
 
 
-def preprocess_user_data(uploaded, outpath, max_filesize=30):
+def preprocess_user_data(uploaded, outpath, max_filesize=30, empty_file_ok: Optional[bool] = True):
     """
     Preprocesses user-uploaded data to the format required for QA4SM.
 
@@ -206,12 +207,15 @@ def preprocess_user_data(uploaded, outpath, max_filesize=30):
     if uploaded.name.endswith(".nc") or uploaded.name.endswith(".nc4"):
         # user upload of netCDF stack
         reader = StackImageReader(uploaded)
-        netcdf_file_name = os.path.basename(uploaded)
-        netcdf_parent_dir = os.path.dirname(uploaded)
-        os.remove(uploaded)
-        netcdf_file = netCDF4.Dataset(os.path.join(netcdf_parent_dir, netcdf_file_name), 'w')
-        netcdf_file.close()
-        return reader.repurpose(outpath)
+        if empty_file_ok:
+            netcdf_file_name = os.path.basename(uploaded)
+            netcdf_parent_dir = os.path.dirname(uploaded)
+            os.remove(uploaded)
+            netcdf_file = netCDF4.Dataset(
+                os.path.join(netcdf_parent_dir, netcdf_file_name), 'w')
+            netcdf_file.close()
+        else:
+            return reader.repurpose(outpath)
     elif uploaded.name.endswith(".zip"):
         zfile = ZipFile(uploaded)
 
@@ -244,22 +248,25 @@ def preprocess_user_data(uploaded, outpath, max_filesize=30):
                 with zfile.open(f) as zf, open(outpath / Path(f).name,
                                                "wb") as tf:
                     shutil.copyfileobj(zf, tf)
-            zip_file_name = os.path.basename(uploaded)
-            zip_parent_dir = os.path.dirname(uploaded)
-            os.remove(uploaded)
-            with ZipFile(os.path.join(zip_parent_dir, zip_file_name),
-                         'w') as zf:
-                pass
-            # os.remove(uploaded)
-            return GriddedNcContiguousRaggedTs(outpath)
+            if empty_file_ok:
+                zip_file_name = os.path.basename(uploaded)
+                zip_parent_dir = os.path.dirname(uploaded)
+                os.remove(uploaded)
+                with ZipFile(os.path.join(zip_parent_dir, zip_file_name),
+                             'w') as zf:
+                    pass
+            else:
+                return GriddedNcContiguousRaggedTs(outpath)
         else:  # only csv files present
             reader = ZippedCsvTs(uploaded)
-            zip_file_name = os.path.basename(uploaded)
-            zip_parent_dir = os.path.dirname(uploaded)
-            os.remove(uploaded)
-            with ZipFile(os.path.join(zip_parent_dir, zip_file_name), 'w') as zf:
-                pass
-            return reader.repurpose(outpath)
+            if empty_file_ok:
+                zip_file_name = os.path.basename(uploaded)
+                zip_parent_dir = os.path.dirname(uploaded)
+                os.remove(uploaded)
+                with ZipFile(os.path.join(zip_parent_dir, zip_file_name), 'w') as zf:
+                    pass
+            else:
+                return reader.repurpose(outpath)
     else:  # pragma: no cover
         raise ValueError(f"Unknown uploaded data format: {str(uploaded)},"
                          " only *.nc and *.zip are supported.")

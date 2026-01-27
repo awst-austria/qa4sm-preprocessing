@@ -274,6 +274,6 @@ def test_hr_cgls_preprocessing(test_output_path):
 
     reader = preprocess_user_data(
         test_data_user_upload_path / "teststack_hr_cgls_small.nc",
-        test_output_path / "pynetcf"
+        test_output_path / "pynetcf", empty_file_ok=False
     )
     assert "crs" not in reader.variable_description().keys()

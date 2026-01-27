@@ -87,6 +87,16 @@ jobs:
         with:
           name: Artifacts-py${{ matrix.python-version }}-${{ matrix.os }}
           path: artifacts/*
+
+      - name: Show Git Status at the End
+        shell: bash -l {0}
+        run: |
+          echo "=== Git Status (end of workflow) ==="
+          git status -uall
+          echo "=== Git Diff (tracked file changes) ==="
+          git diff
+
+
   coveralls:
     name: Submit Coveralls 👚
     needs: build

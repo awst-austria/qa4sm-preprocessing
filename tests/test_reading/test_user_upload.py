@@ -94,7 +94,7 @@ def test_csv_pipeline(test_output_path):
 
     # do the preprocessing with the full preprocessing function
     outpath = test_output_path / "gridded_ts"
-    reader = preprocess_user_data(zfile, outpath)
+    reader = preprocess_user_data(zfile, outpath, empty_file_ok=False)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     desc = {
@@ -149,7 +149,7 @@ def test_contiguous_ragged_pipeline(test_output_path):
 
     # do the preprocessing with the full preprocessing function
     outpath = test_output_path / "gridded_ts"
-    reader = preprocess_user_data(zfile, outpath)
+    reader = preprocess_user_data(zfile, outpath, empty_file_ok=False)
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     check_reader(reader)
     desc = {
@@ -168,7 +168,7 @@ def test_stack_pipeline(synthetic_test_args, test_output_path):
     ds, kwargs = synthetic_test_args
     ds.to_netcdf(stackpath)
 
-    reader = preprocess_user_data(stackpath, test_output_path / "stack_ts")
+    reader = preprocess_user_data(stackpath, test_output_path / "stack_ts", empty_file_ok=False)
     assert isinstance(reader, GriddedNcOrthoMultiTs)
 
     gpis, lons, lats, _ = reader.grid.get_grid_points()
@@ -200,7 +200,7 @@ def test_csv_pipeline_no_metadata(test_output_path):
 
     # do the preprocessing with the full preprocessing function
     outpath = test_output_path / "gridded_ts"
-    reader = preprocess_user_data(zfile, outpath)
+    reader = preprocess_user_data(zfile, outpath, empty_file_ok=False)
 
     assert isinstance(reader, GriddedNcContiguousRaggedTs)
     for i in range(len(timeseries)):
@@ -274,6 +274,6 @@ def test_hr_cgls_preprocessing(test_output_path):
 
     reader = preprocess_user_data(
         test_data_user_upload_path / "teststack_hr_cgls_small.nc",
-        test_output_path / "pynetcf"
+        test_output_path / "pynetcf", empty_file_ok=False
     )
     assert "crs" not in reader.variable_description().keys()
